@@ -103,8 +103,10 @@ exist.
 ### 7. Deploy (Render free tier)
 
 Push this repo to GitHub, connect it in the Render dashboard ("New +" →
-"Blueprint" — it picks up `render.yaml`), set `APP_PASSWORD` in the Render
-env var UI (marked `sync: false` so it's never in the repo).
+"Blueprint" — it picks up `render.yaml` from the **repo root**, which sets
+`rootDir: silas-ops` so the build/start commands run against this
+subfolder), set `APP_PASSWORD` in the Render env var UI (marked
+`sync: false` so it's never in the repo).
 
 `data/ops.db` and `journal/` live on Render's ephemeral disk by default —
 wiped on every redeploy. Attach a Render persistent disk once this is in
