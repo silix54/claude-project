@@ -1,0 +1,27 @@
+# Render free-tier web service. Deploy: connect this repo in the Render
+# dashboard, it picks up this file automatically ("New +" -> "Blueprint").
+#
+# Cold start of 30-60s after 15 minutes idle is an accepted tradeoff for a
+# 1-2x/day personal dashboard (see BUILD_PROMPT.md's architecture notes) —
+# not something to fix here. A Raspberry Pi + Tailscale setup is the
+# natural upgrade later if that becomes annoying.
+#
+# data/ops.db and journal/ live on Render's ephemeral disk by default,
+# which is wiped on every deploy. Either attach a Render persistent disk
+# (paid) or accept that redeploys reset the DB — for a free-tier personal
+# project, the pragmatic move is a paid 1GB disk once this is actually in
+# daily use, or an early self-migration to the Pi.
+services:
+  - type: web
+    name: silas-ops
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    envVars:
+      - key: APP_PASSWORD
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: 3.11.15
