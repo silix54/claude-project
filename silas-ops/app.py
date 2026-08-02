@@ -286,16 +286,22 @@ def create_app():
         flow = google_auth.web_flow(redirect_uri)
         auth_url, state = flow.authorization_url(access_type="offline", prompt="consent")
         session["google_oauth_state"] = state
+        # authorization_url() is what generates flow.code_verifier (PKCE) —
+        # it doesn't exist before this call. /callback builds an unrelated
+        # Flow object, so this has to be handed back the same way state is,
+        # or Google rejects the token exchange with "Missing code verifier".
+        session["google_oauth_code_verifier"] = flow.code_verifier
         return redirect(auth_url)
 
     @app.get("/oauth/google/callback")
     @auth.login_required
     def google_oauth_callback():
         expected_state = session.pop("google_oauth_state", None)
+        code_verifier = session.pop("google_oauth_code_verifier", None)
         if not expected_state or request.args.get("state") != expected_state:
             return "OAuth state mismatch — start the connection again from /oauth/google/start.", 400
         redirect_uri = url_for("google_oauth_callback", _external=True)
-        flow = google_auth.web_flow(redirect_uri, state=expected_state)
+        flow = google_auth.web_flow(redirect_uri, state=expected_state, code_verifier=code_verifier)
         flow.fetch_token(authorization_response=request.url)
         google_auth.save_credentials(flow.credentials)
         return redirect(url_for("daily"))

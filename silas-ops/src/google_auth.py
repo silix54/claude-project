@@ -68,18 +68,32 @@ def is_authorized() -> bool:
         return False
 
 
-def web_flow(redirect_uri: str, state: str | None = None):
+def web_flow(redirect_uri: str, state: str | None = None, code_verifier: str | None = None):
     """Flow object for the /oauth/google/start -> /oauth/google/callback
-    round trip.
+    round trip. /start and /callback each build their own Flow instance
+    (nothing is kept alive across the request), so two things that live on
+    the Flow object itself have to be handed back in explicitly on
+    /callback, or the exchange fails:
 
-    On /start, call with state=None — the Flow mints one (flow.state) and
-    the caller stashes it in the session. On /callback, call with the
-    session's stashed state passed back in: without it, the underlying
-    oauthlib client's state-check is a silent no-op (it only compares when
-    self.state is truthy), so the callback would accept a `state`/`code`
-    pair from anywhere — an attacker's own OAuth flow, replayed onto a
-    logged-in victim, would get their credentials saved as this app's. See
-    the security-review finding this fixes.
+    - `state`: On /start, call with state=None — the Flow mints one
+      (flow.authorization_url()'s second return value) and the caller
+      stashes it in the session. On /callback, pass the session's stashed
+      state back in: without it, the underlying oauthlib client's
+      state-check is a silent no-op (it only compares when self.state is
+      truthy), so the callback would accept a `state`/`code` pair from
+      anywhere — an attacker's own OAuth flow, replayed onto a logged-in
+      victim, would get their credentials saved as this app's. See the
+      security-review finding this fixes.
+    - `code_verifier`: authorization_url() auto-generates a random PKCE
+      code_verifier and sends its code_challenge to Google as part of the
+      auth URL. Google then requires that same code_verifier at token-
+      exchange time. A fresh Flow built on /callback with no code_verifier
+      passed in has none (fetch_token() sends None), so Google rejects the
+      exchange with "invalid_grant: Missing code verifier" — the auth
+      *looks* successful (scopes granted, redirected back) right up until
+      this call. On /start, after calling authorization_url(), read back
+      flow.code_verifier (now populated) and stash it in the session
+      alongside state; pass it back in here on /callback.
     """
     from google_auth_oauthlib.flow import Flow
 
@@ -93,7 +107,8 @@ def web_flow(redirect_uri: str, state: str | None = None):
             "OAuth client ID -> Web application -> add this redirect URI -> "
             "download JSON.")
     return Flow.from_client_secrets_file(
-        str(creds_path), scopes=ALL_SCOPES, redirect_uri=redirect_uri, state=state)
+        str(creds_path), scopes=ALL_SCOPES, redirect_uri=redirect_uri,
+        state=state, code_verifier=code_verifier)
 
 
 def save_credentials(creds):
