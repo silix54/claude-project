@@ -4,6 +4,12 @@ Reminders covered: devotions not logged by evening, today's overdue/due
 tasks each morning, deadlines inside 48 hours. A background thread checks
 these on an interval and sends at most once per day per reminder kind, so
 a container restart or a slow check loop doesn't spam duplicates.
+
+Both key files (vapid.json, vapid_private.pem) are generated once, locally,
+via `cli push-keys` — this app never regenerates them itself. Read-side,
+they're looked up via secret_files.read_path(): locally that's
+secrets/<name>, on Render it's whatever Secret File you uploaded (lands
+flat at /etc/secrets/<name> regardless of the path typed for it).
 """
 
 from __future__ import annotations
@@ -11,11 +17,10 @@ import json
 import threading
 import time
 from datetime import date, datetime
-from pathlib import Path
 from zoneinfo import ZoneInfo
 
-VAPID_FILE = Path("secrets/vapid.json")            # {public_key, subject}
-VAPID_PRIVATE_PEM = Path("secrets/vapid_private.pem")
+from . import secret_files
+
 TZ = ZoneInfo("America/Toronto")
 CHECK_INTERVAL_SECONDS = 900  # 15 min: reminders are daily-grain, not urgent
 
@@ -35,31 +40,32 @@ def generate_vapid_keys(subject: str = "mailto:you@example.com"):
                                     serialization.PublicFormat.UncompressedPoint)
     pub_b64 = base64.urlsafe_b64encode(raw).rstrip(b"=").decode()
 
-    VAPID_FILE.parent.mkdir(exist_ok=True)
-    VAPID_PRIVATE_PEM.write_text(v.private_pem().decode())
-    VAPID_FILE.write_text(json.dumps({"public_key": pub_b64, "subject": subject}))
+    secret_files.write_path("vapid_private.pem").write_text(v.private_pem().decode())
+    secret_files.write_path("vapid.json").write_text(json.dumps({"public_key": pub_b64,
+                                                                   "subject": subject}))
     return v
 
 
 def public_key() -> str | None:
-    if not VAPID_FILE.exists():
+    if not secret_files.exists("vapid.json"):
         return None
-    return json.loads(VAPID_FILE.read_text())["public_key"]
+    return json.loads(secret_files.read_path("vapid.json").read_text())["public_key"]
 
 
 def _vapid_claims():
-    cfg = json.loads(VAPID_FILE.read_text())
+    cfg = json.loads(secret_files.read_path("vapid.json").read_text())
     return {"sub": cfg["subject"]}
 
 
 def send(subscription: dict, payload: dict) -> bool:
     from pywebpush import webpush, WebPushException
 
-    if not VAPID_FILE.exists() or not VAPID_PRIVATE_PEM.exists():
+    if not secret_files.exists("vapid.json") or not secret_files.exists("vapid_private.pem"):
         return False
     try:
         webpush(subscription_info=subscription, data=json.dumps(payload),
-               vapid_private_key=str(VAPID_PRIVATE_PEM), vapid_claims=_vapid_claims())
+               vapid_private_key=str(secret_files.read_path("vapid_private.pem")),
+               vapid_claims=_vapid_claims())
         return True
     except WebPushException:
         return False  # includes 404/410 (dead subscription) — caller prunes either way

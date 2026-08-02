@@ -7,6 +7,14 @@ Strava's OAuth is its own app (separate client id/secret from Google, kept
 in secrets/strava.json), refreshed with a stored refresh token — not routed
 through google_auth.py, since it's an unrelated provider.
 
+Both strava.json (read-only — you create it once from Strava's API
+settings) and strava_token.json (read + written by this module, on every
+connect and refresh) are looked up via secret_files.read_path(): locally
+that's secrets/<name>, on Render it's whatever Secret File you uploaded,
+which lands flat at /etc/secrets/<name> regardless of the path you typed
+for it. Writes always go to the local secrets/ path — /etc/secrets is a
+read-only mount on Render.
+
 Same never-hard-fail contract as gcal/gtasks: on any failure, fall back to
 the last successful cache and let the caller show a stale indicator instead
 of blanking the page.
@@ -21,9 +29,8 @@ from pathlib import Path
 
 import requests
 
-SECRETS = Path("secrets")
-CREDS = SECRETS / "strava.json"        # {client_id, client_secret}
-TOKEN = SECRETS / "strava_token.json"  # {access_token, refresh_token, expires_at}
+from . import secret_files
+
 CACHE = Path("data/.strava_cache.json")
 
 AUTH_URL = "https://www.strava.com/oauth/authorize"
@@ -55,7 +62,7 @@ class Activity:
 
 
 def is_connected() -> bool:
-    return TOKEN.exists()
+    return secret_files.exists("strava_token.json")
 
 
 def authorize_url(redirect_uri: str, state: str) -> str:
@@ -65,7 +72,7 @@ def authorize_url(redirect_uri: str, state: str) -> str:
     links the *attacker's* Strava account to this app instead."""
     from urllib.parse import urlencode
 
-    creds = json.loads(CREDS.read_text())
+    creds = json.loads(secret_files.read_path("strava.json").read_text())
     params = {"client_id": creds["client_id"], "redirect_uri": redirect_uri,
              "response_type": "code", "approval_prompt": "auto", "scope": SCOPE,
              "state": state}
@@ -73,7 +80,7 @@ def authorize_url(redirect_uri: str, state: str) -> str:
 
 
 def exchange_code(code: str):
-    creds = json.loads(CREDS.read_text())
+    creds = json.loads(secret_files.read_path("strava.json").read_text())
     r = requests.post(TOKEN_URL, data={
         "client_id": creds["client_id"], "client_secret": creds["client_secret"],
         "code": code, "grant_type": "authorization_code"}, timeout=10)
@@ -82,8 +89,7 @@ def exchange_code(code: str):
 
 
 def _save_token(payload: dict):
-    SECRETS.mkdir(exist_ok=True)
-    TOKEN.write_text(json.dumps({
+    secret_files.write_path("strava_token.json").write_text(json.dumps({
         "access_token": payload["access_token"],
         "refresh_token": payload["refresh_token"],
         "expires_at": payload["expires_at"],
@@ -91,10 +97,10 @@ def _save_token(payload: dict):
 
 
 def _access_token() -> str:
-    tok = json.loads(TOKEN.read_text())
+    tok = json.loads(secret_files.read_path("strava_token.json").read_text())
     if tok["expires_at"] > time.time() + 60:
         return tok["access_token"]
-    creds = json.loads(CREDS.read_text())
+    creds = json.loads(secret_files.read_path("strava.json").read_text())
     r = requests.post(TOKEN_URL, data={
         "client_id": creds["client_id"], "client_secret": creds["client_secret"],
         "refresh_token": tok["refresh_token"], "grant_type": "refresh_token"}, timeout=10)
@@ -107,7 +113,7 @@ def _access_token() -> str:
 def fetch(days: int = 14) -> tuple[list[Activity], bool]:
     """Returns (activities, live). live=False means the cache was used."""
     try:
-        if not TOKEN.exists():
+        if not secret_files.exists("strava_token.json"):
             raise FileNotFoundError("Strava not connected yet")
         token = _access_token()
         after = int((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())

@@ -93,6 +93,7 @@ def cmd_weigh(argv):
 
 def cmd_check():
     import yaml
+    from . import secret_files
     ok = True
     for f in ["config/term.yaml", "config/training.yaml"]:
         try:
@@ -101,14 +102,16 @@ def cmd_check():
         except Exception as e:
             ok = False
             print(f"FAIL {f}: {e}")
-    print("ok   secrets/credentials.json" if Path("secrets/credentials.json").exists()
-          else "warn secrets/credentials.json missing, calendar/tasks/drive will run offline")
-    print("ok   secrets/token.json" if Path("secrets/token.json").exists()
-          else "warn secrets/token.json missing, run `auth` (local) or /oauth/google/start (deployed)")
-    print("ok   secrets/strava.json" if Path("secrets/strava.json").exists()
-          else "warn secrets/strava.json missing, strava will run offline")
-    print("ok   secrets/vapid.json" if Path("secrets/vapid.json").exists()
-          else "warn secrets/vapid.json missing, push notifications disabled — run push-keys")
+    for name, warning in [
+        ("credentials.json", "calendar/tasks/drive will run offline"),
+        ("token.json", "run `auth` (local) or /oauth/google/start (deployed)"),
+        ("strava.json", "strava will run offline"),
+        ("vapid.json", "push notifications disabled — run push-keys"),
+    ]:
+        if secret_files.exists(name):
+            print(f"ok   {secret_files.read_path(name)}")
+        else:
+            print(f"warn {name} missing (checked secrets/ and /etc/secrets/) — {warning}")
     sys.exit(0 if ok else 1)
 
 

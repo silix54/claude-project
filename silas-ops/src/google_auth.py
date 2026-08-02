@@ -16,15 +16,20 @@ Two ways to mint the token:
 Both write secrets/token.json in the same authorized-user JSON shape, so
 gcal.py / gtasks.py / drive.py only ever need to call credentials() here
 and never touch OAuth mechanics themselves.
+
+credentials.json is read-only from this app's side (you download it once
+from Google Cloud Console), so it's looked up via secret_files.read_path()
+— locally that's secrets/credentials.json, on Render it's whatever Secret
+File you uploaded, which lands at /etc/secrets/credentials.json regardless
+of the path you typed for it (see secret_files.py). token.json is
+different: this app writes it too (after the OAuth round trip, and on
+every refresh), so writes always target the local secrets/ path — /etc/
+secrets is a read-only mount on Render, there's nowhere else to write it.
 """
 
 from __future__ import annotations
-import json
-from pathlib import Path
 
-SECRETS = Path("secrets")
-CREDS = SECRETS / "credentials.json"
-TOKEN = SECRETS / "token.json"
+from . import secret_files
 
 ALL_SCOPES = [
     "https://www.googleapis.com/auth/calendar.readonly",
@@ -42,14 +47,15 @@ def credentials():
     from google.oauth2.credentials import Credentials
     from google.auth.transport.requests import Request
 
-    if not TOKEN.exists():
+    token_path = secret_files.read_path("token.json")
+    if not token_path.exists():
         raise NotAuthorized("no token yet — visit /oauth/google/start")
-    creds = Credentials.from_authorized_user_file(str(TOKEN), ALL_SCOPES)
+    creds = Credentials.from_authorized_user_file(str(token_path), ALL_SCOPES)
     if creds and creds.valid:
         return creds
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
-        TOKEN.write_text(creds.to_json())
+        secret_files.write_path("token.json").write_text(creds.to_json())
         return creds
     raise NotAuthorized("token invalid and not refreshable — re-run auth")
 
@@ -77,18 +83,21 @@ def web_flow(redirect_uri: str, state: str | None = None):
     """
     from google_auth_oauthlib.flow import Flow
 
-    if not CREDS.exists():
+    creds_path = secret_files.read_path("credentials.json")
+    if not creds_path.exists():
         raise FileNotFoundError(
-            "secrets/credentials.json missing. Google Cloud Console -> "
+            "credentials.json missing. Locally: save it to "
+            "secrets/credentials.json. On Render: upload it as a Secret "
+            "File (any path you type there — it lands flat at "
+            "/etc/secrets/credentials.json). Google Cloud Console -> "
             "OAuth client ID -> Web application -> add this redirect URI -> "
-            "download JSON -> save as secrets/credentials.json")
+            "download JSON.")
     return Flow.from_client_secrets_file(
-        str(CREDS), scopes=ALL_SCOPES, redirect_uri=redirect_uri, state=state)
+        str(creds_path), scopes=ALL_SCOPES, redirect_uri=redirect_uri, state=state)
 
 
 def save_credentials(creds):
-    SECRETS.mkdir(exist_ok=True)
-    TOKEN.write_text(creds.to_json())
+    secret_files.write_path("token.json").write_text(creds.to_json())
 
 
 DESKTOP_AUTH_PORT = 8765  # fixed, not random — see setup note below
@@ -108,9 +117,10 @@ def desktop_flow():
     """
     from google_auth_oauthlib.flow import InstalledAppFlow
 
-    if not CREDS.exists():
+    creds_path = secret_files.read_path("credentials.json")
+    if not creds_path.exists():
         raise FileNotFoundError("secrets/credentials.json missing")
-    flow = InstalledAppFlow.from_client_secrets_file(str(CREDS), ALL_SCOPES)
+    flow = InstalledAppFlow.from_client_secrets_file(str(creds_path), ALL_SCOPES)
     creds = flow.run_local_server(port=DESKTOP_AUTH_PORT)
     save_credentials(creds)
     return creds
