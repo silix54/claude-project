@@ -58,10 +58,18 @@ def is_connected() -> bool:
     return TOKEN.exists()
 
 
-def authorize_url(redirect_uri: str) -> str:
+def authorize_url(redirect_uri: str, state: str) -> str:
+    """`state` is minted by the caller (app.py) and stashed in the session
+    to verify against the callback — without it, anyone who starts their
+    own Strava consent could hand a logged-in user a callback link that
+    links the *attacker's* Strava account to this app instead."""
+    from urllib.parse import urlencode
+
     creds = json.loads(CREDS.read_text())
-    return (f"{AUTH_URL}?client_id={creds['client_id']}&redirect_uri={redirect_uri}"
-           f"&response_type=code&approval_prompt=auto&scope={SCOPE}")
+    params = {"client_id": creds["client_id"], "redirect_uri": redirect_uri,
+             "response_type": "code", "approval_prompt": "auto", "scope": SCOPE,
+             "state": state}
+    return f"{AUTH_URL}?{urlencode(params)}"
 
 
 def exchange_code(code: str):

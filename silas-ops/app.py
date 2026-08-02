@@ -291,8 +291,11 @@ def create_app():
     @app.get("/oauth/google/callback")
     @auth.login_required
     def google_oauth_callback():
+        expected_state = session.pop("google_oauth_state", None)
+        if not expected_state or request.args.get("state") != expected_state:
+            return "OAuth state mismatch — start the connection again from /oauth/google/start.", 400
         redirect_uri = url_for("google_oauth_callback", _external=True)
-        flow = google_auth.web_flow(redirect_uri)
+        flow = google_auth.web_flow(redirect_uri, state=expected_state)
         flow.fetch_token(authorization_response=request.url)
         google_auth.save_credentials(flow.credentials)
         return redirect(url_for("daily"))
@@ -303,11 +306,16 @@ def create_app():
     @auth.login_required
     def strava_oauth_start():
         redirect_uri = url_for("strava_oauth_callback", _external=True)
-        return redirect(strava.authorize_url(redirect_uri))
+        state = pysecrets.token_urlsafe(24)
+        session["strava_oauth_state"] = state
+        return redirect(strava.authorize_url(redirect_uri, state))
 
     @app.get("/oauth/strava/callback")
     @auth.login_required
     def strava_oauth_callback():
+        expected_state = session.pop("strava_oauth_state", None)
+        if not expected_state or request.args.get("state") != expected_state:
+            return "OAuth state mismatch — start the connection again from /oauth/strava/start.", 400
         strava.exchange_code(request.args["code"])
         return redirect(url_for("daily"))
 

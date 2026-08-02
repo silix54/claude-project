@@ -62,10 +62,19 @@ def is_authorized() -> bool:
         return False
 
 
-def web_flow(redirect_uri: str):
+def web_flow(redirect_uri: str, state: str | None = None):
     """Flow object for the /oauth/google/start -> /oauth/google/callback
-    round trip. Caller stashes flow.state in the session to check on
-    callback (CSRF protection for the OAuth dance)."""
+    round trip.
+
+    On /start, call with state=None — the Flow mints one (flow.state) and
+    the caller stashes it in the session. On /callback, call with the
+    session's stashed state passed back in: without it, the underlying
+    oauthlib client's state-check is a silent no-op (it only compares when
+    self.state is truthy), so the callback would accept a `state`/`code`
+    pair from anywhere — an attacker's own OAuth flow, replayed onto a
+    logged-in victim, would get their credentials saved as this app's. See
+    the security-review finding this fixes.
+    """
     from google_auth_oauthlib.flow import Flow
 
     if not CREDS.exists():
@@ -74,7 +83,7 @@ def web_flow(redirect_uri: str):
             "OAuth client ID -> Web application -> add this redirect URI -> "
             "download JSON -> save as secrets/credentials.json")
     return Flow.from_client_secrets_file(
-        str(CREDS), scopes=ALL_SCOPES, redirect_uri=redirect_uri)
+        str(CREDS), scopes=ALL_SCOPES, redirect_uri=redirect_uri, state=state)
 
 
 def save_credentials(creds):
