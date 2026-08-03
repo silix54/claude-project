@@ -3,13 +3,19 @@
 Design intent: an operations brief, not a productivity app. The signature
 element is the day bar, which shows gaps rather than events, because the
 constraint being managed here is energy and where it actually goes.
+
+Color/theme tokens, the nav bar, and dark-mode wiring live in chrome.py —
+imported here as FIELD/INK/etc (now CSS var() references, not literal
+hex) so every existing {INK}, {FIELD}... interpolation below is already
+theme-aware.
 """
 
 from __future__ import annotations
 import html
 from datetime import datetime, time, date
 
-FIELD, INK, SIGNAL, ALERT, MUTE, RULE = "#E8E6E1", "#16181D", "#1F4B99", "#A8431C", "#6E7278", "#C9C5BC"
+from .chrome import (FIELD, SURFACE, INK, MUTE, RULE, SIGNAL, ALERT, SUCCESS,
+                     THEME_VARS, NO_FLASH_SCRIPT, THEME_TOGGLE_TAG, NAV_CSS, nav_bar)
 
 
 def esc(s):
@@ -117,10 +123,12 @@ def _training(s):
         f'{" · Z" + str(x["zone"]) if x.get("zone") else ""}</span></li>'
         for x in s["planned_sessions"]) or '<li><span class="empty">Nothing planned.</span></li>'
     comp = s["compliance"]
-    warn = ""
+    warn = ok = ""
     if comp["streak"] >= s["guards"]["max_consecutive_training_days"]:
         warn = (f'<p class="flag">{comp["streak"]} consecutive training days. '
                 f'Guard is {s["guards"]["max_consecutive_training_days"]}. Take the rest day.</p>')
+    elif comp["streak"] > 0:
+        ok = f'<p class="sub ok">{comp["streak"]}-day streak, under the guard — on track.</p>'
     note = f'<p class="note">{esc(s["deload_rules"]["note"])}</p>' if c.is_deload else ""
     recent = s.get("recent_activities") or []
     recent_html = ""
@@ -137,7 +145,7 @@ def _training(s):
 <input type="number" step="0.5" name="weight_lb" placeholder="lb" style="width:60px">
 <button type="submit">Log</button></form>"""
     return (f'<div class="cyc">{esc(c.label)} {tag}</div>{note}'
-            f'<ul class="sess">{items}</ul>{warn}'
+            f'<ul class="sess">{items}</ul>{warn}{ok}'
             f'<p class="sub">{comp["logged"]} sessions logged in 7 days · '
             f'last {esc(comp["last"] or "never")}</p>{recent_html}{quickadd}')
 
@@ -184,10 +192,10 @@ def _ahead(s):
     return "".join(out)
 
 
-CSS = f"""
+CSS = THEME_VARS + f"""
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{background:{FIELD};color:{INK};font:14px/1.5 'IBM Plex Mono',ui-monospace,monospace;
- padding:28px 22px 60px;-webkit-font-smoothing:antialiased}}
+ padding:28px 22px 60px;-webkit-font-smoothing:antialiased;transition:background .15s,color .15s}}
 .wrap{{max-width:1180px;margin:0 auto}}
 h1,h2,h3,.lbl{{font-family:'IBM Plex Sans Condensed','IBM Plex Sans',sans-serif}}
 header{{display:flex;justify-content:space-between;align-items:flex-end;
@@ -213,8 +221,9 @@ h1{{font-size:30px;font-weight:600;letter-spacing:-.02em;line-height:1}}
 .legend{{font-size:10px;color:{MUTE};letter-spacing:.1em;text-transform:uppercase;
  display:flex;gap:18px;margin-bottom:26px}}
 .legend b{{color:{SIGNAL};font-weight:500}}
-.grid{{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:26px}}
-section{{border-top:1px solid {INK};padding-top:9px}}
+.grid{{display:grid;grid-template-columns:1.15fr 1fr 1fr;gap:20px}}
+section{{background:{SURFACE};border:1px solid {RULE};border-top:2px solid {INK};
+ padding:14px 16px 18px}}
 h2{{font-size:11px;letter-spacing:.18em;text-transform:uppercase;font-weight:600;margin-bottom:11px}}
 h3{{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:{MUTE};
  font-weight:600;margin:16px 0 6px}}
@@ -233,6 +242,7 @@ ul{{list-style:none}}
 li.high b{{color:{ALERT}!important}}
 li.high{{background:rgba(168,67,28,.07)}}
 li.watch b{{color:{SIGNAL}!important}}
+.ok,.ok b{{color:{SUCCESS}!important}}
 .cyc{{font-family:'IBM Plex Sans Condensed',sans-serif;font-size:19px;font-weight:600;
  margin-bottom:4px}}
 .dl{{color:{ALERT};font-size:12px;font-style:normal;letter-spacing:.1em;text-transform:uppercase}}
@@ -262,7 +272,7 @@ footer{{margin-top:34px;padding-top:9px;border-top:1px solid {RULE};font-size:10
 @media(prefers-reduced-motion:no-preference){{section{{animation:f .4s ease both}}
  section:nth-child(2){{animation-delay:.06s}}section:nth-child(3){{animation-delay:.12s}}
  @keyframes f{{from{{opacity:0;transform:translateY(6px)}}}}}}
-"""
+""" + NAV_CSS
 
 
 def _focus_banner(s):
@@ -284,12 +294,15 @@ def render(s) -> str:
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{d.strftime('%a %d %b')} — ops</title>
+{NO_FLASH_SCRIPT}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 <link rel="manifest" href="/static/manifest.json">
-<style>{CSS}</style></head><body><div class="wrap">
+<style>{CSS}</style></head><body>
+{nav_bar('daily')}
+<div class="wrap">
 <header>
   <h1>{d.strftime('%A %-d %B')}</h1>
   <div class="dtg">{esc(s['term']['name'])} · {esc(s['cycle'].label)}<br>
@@ -314,8 +327,8 @@ def render(s) -> str:
   <section><h2>Body</h2>{_training(s)}<h3>Fuel</h3>{_fuel(s)}</section>
 </div>
 
-<footer>Read only against Google Calendar · tasks via Google Tasks ·
-<a href="/plan" style="color:inherit">plan</a> · <a href="/reflect" style="color:inherit">reflect</a> ·
-<a href="/settings" style="color:inherit">settings</a></footer>
+<footer>Read only against Google Calendar · tasks via Google Tasks</footer>
 <script src="/static/push.js"></script>
-</div></body></html>"""
+</div>
+{THEME_TOGGLE_TAG}
+</body></html>"""

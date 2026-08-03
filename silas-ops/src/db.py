@@ -1,6 +1,6 @@
 """Everything editable from the phone lives here, not in a YAML file.
 
-One file, data/ops.db. No server process, no extra dependency beyond
+One file, <DATA_DIR>/ops.db. No server process, no extra dependency beyond
 Python's built-in sqlite3. Safe for a single user hitting it from one
 device at a time, which is the only case that matters here.
 
@@ -10,16 +10,22 @@ fit for "I add a new habit from my phone on a Tuesday." A database with
 a settings page can be written to from a web form. A YAML file on a
 server can't be edited by you without SSHing in, which defeats the
 entire point of making this modular.
+
+DATA_DIR defaults to "data" (this repo's original path, still what local
+dev uses) but on Render points at the mounted persistent disk — see
+render.yaml's `disk` block. Without that env var, ops.db would sit on
+Render's default ephemeral filesystem and get wiped on every redeploy.
 """
 
 from __future__ import annotations
 import json
+import os
 import sqlite3
 from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
-DB_PATH = Path("data/ops.db")
+DB_PATH = Path(os.environ.get("DATA_DIR", "data")) / "ops.db"
 
 DEFAULT_PRIORITY_ORDER = ["school", "work", "faith", "fitness", "relationships"]
 DEFAULT_GUARDS = {"max_consecutive_training_days": 5, "min_sleep_hours": 7,

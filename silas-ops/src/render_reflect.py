@@ -8,7 +8,8 @@ from __future__ import annotations
 import html
 from datetime import date, timedelta
 
-from .render import FIELD, INK, SIGNAL, ALERT, MUTE, RULE, esc
+from .render import FIELD, INK, SIGNAL, ALERT, MUTE, RULE, SUCCESS, esc
+from .chrome import NO_FLASH_SCRIPT, THEME_TOGGLE_TAG, nav_bar
 
 CELL, GAP = 12, 3
 
@@ -19,8 +20,8 @@ def habit_toggle_row(habits: list[dict], done_today: dict[int, bool]) -> str:
         return ""
     chips = "".join(
         f"""<button hx-post="/reflect/habit/{h['id']}/toggle" hx-target="closest section" hx-swap="none"
-        style="border-color:{SIGNAL if done_today.get(h['id']) else RULE};
-        color:{SIGNAL if done_today.get(h['id']) else INK}">
+        style="border-color:{SUCCESS if done_today.get(h['id']) else RULE};
+        color:{SUCCESS if done_today.get(h['id']) else INK}">
         {esc(h['name'])} {'✓' if done_today.get(h['id']) else ''}</button>"""
         for h in habits)
     return f'<div class="chips" style="margin-bottom:10px">{chips}</div>'
@@ -152,8 +153,8 @@ CSS_EXTRA = f"""
 .corr li{{display:flex;gap:9px;padding:6px 0;border-bottom:1px solid {RULE};font-size:12.5px}}
 .corr li b{{flex:0 0 130px}}
 .corr li.dim span{{color:{MUTE};font-style:italic}}
-.devo{{border:2px solid {INK};padding:14px 16px;margin-bottom:4px}}
-.devo.done{{border-color:{SIGNAL}}}
+.devo{{border:2px solid {INK};background:{FIELD};padding:14px 16px;margin-bottom:4px}}
+.devo.done{{border-color:{SUCCESS}}}
 .devo h2{{margin-bottom:9px}}
 .moodform{{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end;margin-top:10px}}
 .moodform label{{display:flex;flex-direction:column;gap:4px;font-size:10px;color:{MUTE};
@@ -176,7 +177,7 @@ CSS_EXTRA = f"""
 def devotions_block(done_today: bool, streak: int) -> str:
     cls = "devo done" if done_today else "devo"
     if done_today:
-        body = f'<p class="sub">Logged today · {streak}d streak</p>'
+        body = f'<p class="sub ok">Logged today · {streak}d streak</p>'
     else:
         body = f"""<form hx-post="/reflect/devotions" hx-target="closest .devo" hx-swap="outerHTML">
 <div class="moodform">
@@ -189,7 +190,7 @@ def devotions_block(done_today: bool, streak: int) -> str:
 
 def mood_form(today_logged: bool) -> str:
     if today_logged:
-        return '<p class="sub">Logged today.</p>'
+        return '<p class="sub ok">Logged today.</p>'
     return """<form class="moodform" hx-post="/reflect/mood" hx-target="closest section" hx-swap="none">
 <label>Mood (1-5)<input type="number" name="mood" min="1" max="5" required></label>
 <label>Energy (1-5)<input type="number" name="energy" min="1" max="5" required></label>
@@ -212,9 +213,12 @@ def render_reflect(state: dict) -> str:
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Reflect</title>
+{NO_FLASH_SCRIPT}
 <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<style>{BASE_CSS}{CSS_EXTRA}</style></head><body><div class="wrap">
+<style>{BASE_CSS}{CSS_EXTRA}</style></head><body>
+{nav_bar('reflect')}
+<div class="wrap">
 <header><h1>Reflect</h1><div class="dtg">as of {d.strftime('%a %d %b')}</div></header>
 
 {devotions_block(state['devotions_done_today'], state['devotions_streak'])}
@@ -225,4 +229,6 @@ def render_reflect(state: dict) -> str:
 <section><h2>What tends to move with what</h2>{state['correlation']}</section>
 <section><h2>Journal</h2>{journal_form(state['journal_prompts'])}</section>
 </div>
-</div></body></html>"""
+</div>
+{THEME_TOGGLE_TAG}
+</body></html>"""

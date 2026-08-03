@@ -92,6 +92,10 @@ exist.
   which just means everyone's logged out on every restart — not a security
   hole, just an annoyance.
 - `PORT` — set by Render automatically.
+- `DATA_DIR` — where `ops.db` and `journal/` live. Defaults to `data`
+  (this repo's original local-dev path) when unset. `render.yaml` sets it
+  to `/var/data`, the persistent disk's mount path — see the deploy
+  section below.
 
 ### 6. Run locally
 
@@ -100,7 +104,7 @@ exist.
     # or:
     python -m src.cli today      # render a static copy to out/dashboard.html
 
-### 7. Deploy (Render free tier)
+### 7. Deploy (Render, paid Starter plan — see disk note below)
 
 Push this repo to GitHub, connect it in the Render dashboard ("New +" →
 "Blueprint" — it picks up `render.yaml` from the **repo root**, which sets
@@ -108,10 +112,34 @@ Push this repo to GitHub, connect it in the Render dashboard ("New +" →
 subfolder), set `APP_PASSWORD` in the Render env var UI (marked
 `sync: false` so it's never in the repo).
 
-`data/ops.db` and `journal/` live on Render's ephemeral disk by default —
-wiped on every redeploy. Attach a Render persistent disk once this is in
-daily use, or move to the Raspberry Pi + Tailscale setup the build spec
-flags as the natural next step (removes the cold start too).
+**Persistent disk, one-time step depends on how the service was created:**
+
+`data/ops.db` and `journal/` (both under `DATA_DIR`) now live on a real
+Render persistent disk, declared in `render.yaml`'s `disk:` block
+(`mountPath: /var/data`, `1GB`) — they survive redeploys instead of being
+wiped every time. Render disks require a **paid plan**; `render.yaml`
+sets `plan: starter` accordingly (check current Starter pricing before
+deploying — this is no longer a $0/mo deploy). Attaching a disk also means
+no more zero-downtime deploys (Render can't run two instances against one
+disk at once), which is a non-issue for a 1-2x/day personal dashboard.
+
+- **If the service was created via "New +" → Blueprint** (reads
+  `render.yaml` directly): the disk, `plan: starter`, and the `DATA_DIR`
+  env var all provision automatically on the next Blueprint sync. Nothing
+  to do by hand.
+- **If the service was created manually** (clicked "New Web Service" and
+  pointed it at this repo, rather than "New +" → Blueprint): `render.yaml`
+  is ignored for an existing manually-created service, so add the disk
+  yourself — service → **Settings → Disks → Add Disk**, name
+  `silas-ops-data`, mount path `/var/data`, size `1GB` — and add
+  `DATA_DIR=/var/data` under **Settings → Environment**. Also confirm the
+  service's plan is Starter or above; free-tier services can't attach a
+  disk at all.
+
+Long-term, the build spec's other flagged option is moving to a Raspberry
+Pi + Tailscale setup instead of a paid Render disk — that also removes the
+cold start, and keeps API tokens off a third party's server. Not done
+here; noted as the natural next step if the monthly cost isn't worth it.
 
 ## What's editable from the phone vs. baked into code vs. a config file
 

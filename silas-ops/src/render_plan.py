@@ -7,7 +7,8 @@ build spec's "no page reload" requirement for the Sunday session.
 from __future__ import annotations
 from datetime import timedelta
 
-from .render import CSS, FIELD, INK, SIGNAL, ALERT, MUTE, RULE, esc, dur
+from .render import CSS, FIELD, INK, SIGNAL, ALERT, MUTE, RULE, SUCCESS, esc, dur
+from .chrome import NO_FLASH_SCRIPT, THEME_TOGGLE_TAG, nav_bar
 
 CSS_EXTRA = f"""
 .triage li{{display:flex;gap:9px;padding:7px 0;border-bottom:1px solid {RULE};
@@ -17,6 +18,7 @@ CSS_EXTRA = f"""
 .triage button{{font:11px 'IBM Plex Mono',monospace;letter-spacing:.06em;text-transform:uppercase;
  background:none;border:1px solid {RULE};color:{INK};padding:4px 9px;cursor:pointer;margin-left:5px}}
 .triage button:hover{{border-color:{SIGNAL};color:{SIGNAL}}}
+.triage button.keep:hover{{border-color:{SUCCESS};color:{SUCCESS}}}
 .triage button.drop:hover{{border-color:{ALERT};color:{ALERT}}}
 .review-row{{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid {RULE};
  font-size:12.5px}}
@@ -84,7 +86,7 @@ def _triage_row(t) -> str:
         meta.append(t.due.strftime("%b %-d"))
     return f"""<li id="triage-{t.id}"><span class="tt">{esc(t.text)}</span>
 <span class="tm">{esc(" · ".join(meta))}</span>
-<button hx-post="/plan/triage/{t.id}?action=keep" hx-target="#triage-{t.id}" hx-swap="outerHTML">Keep</button>
+<button class="keep" hx-post="/plan/triage/{t.id}?action=keep" hx-target="#triage-{t.id}" hx-swap="outerHTML">Keep</button>
 <button hx-post="/plan/triage/{t.id}?action=push" hx-target="#triage-{t.id}" hx-swap="outerHTML">+1wk</button>
 <button class="drop" hx-post="/plan/triage/{t.id}?action=drop" hx-target="#triage-{t.id}" hx-swap="outerHTML">Drop</button>
 </li>"""
@@ -122,9 +124,12 @@ def render_plan(state: dict) -> str:
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Plan — ops</title>
+{NO_FLASH_SCRIPT}
 <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<style>{CSS}{CSS_EXTRA}</style></head><body><div class="wrap">
+<style>{CSS}{CSS_EXTRA}</style></head><body>
+{nav_bar('plan')}
+<div class="wrap">
 <header><h1>Sunday plan</h1><div class="dtg">{d.strftime('%a %d %b')}</div></header>
 
 <div class="grid" style="grid-template-columns:1fr">
@@ -134,4 +139,6 @@ def render_plan(state: dict) -> str:
 <section><h2>4. Commit — this week's focus</h2>
 <div id="commit-section">{_commit(state['weekly_focus'])}</div></section>
 </div>
-</div></body></html>"""
+</div>
+{THEME_TOGGLE_TAG}
+</body></html>"""

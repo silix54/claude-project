@@ -8,6 +8,7 @@ time, so the simpler form model is the right amount of machinery.
 from __future__ import annotations
 
 from .render import CSS, FIELD, INK, SIGNAL, ALERT, MUTE, RULE, esc
+from .chrome import NO_FLASH_SCRIPT, THEME_TOGGLE_TAG, nav_bar
 
 CSS_EXTRA = f"""
 .settings-row{{display:flex;gap:9px;align-items:center;padding:6px 0;border-bottom:1px solid {RULE};
@@ -98,8 +99,11 @@ def render_settings(state: dict) -> str:
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Settings — ops</title>
+{NO_FLASH_SCRIPT}
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@400;500;600&display=swap" rel="stylesheet">
-<style>{CSS}{CSS_EXTRA}</style></head><body><div class="wrap">
+<style>{CSS}{CSS_EXTRA}</style></head><body>
+{nav_bar('settings')}
+<div class="wrap">
 <header><h1>Settings</h1></header>
 <div class="grid" style="grid-template-columns:1fr">
 <section><h2>Habits</h2>{_habits(state['habits'])}</section>
@@ -111,4 +115,6 @@ def render_settings(state: dict) -> str:
 <section><h2>Overtraining guards</h2>{_guards(state['guards'])}</section>
 <section><h2>Wake / sleep window</h2>{_wake_sleep(*state['wake_sleep'])}</section>
 </div>
-</div></body></html>"""
+</div>
+{THEME_TOGGLE_TAG}
+</body></html>"""

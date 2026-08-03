@@ -20,23 +20,36 @@ from src import auth, db, google_auth, gtasks, journal, push, strava
 from src.assemble import build
 from src.assemble_plan import build_plan
 from src.assemble_reflect import build_reflect
-from src.render import render, _tasks as render_tasks
+from src.chrome import FIELD, INK, RULE, ALERT, THEME_VARS, NO_FLASH_SCRIPT
+from src.render import render, esc, _tasks as render_tasks
 from src.render_plan import render_plan, triage_list, commit_section
 from src.render_reflect import render_reflect, devotions_block, mood_form
 from src.render_settings import render_settings
 
-LOGIN_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+
+def render_login(error: str = "") -> str:
+    """No nav bar here — nothing else is reachable until you're authed, so
+    there's nothing to navigate to. Still gets the same dark-mode wiring
+    as every other page, so it isn't a jarringly light-only screen for
+    someone whose system (or saved preference) is dark."""
+    err_html = f'<p class="err">{esc(error)}</p>' if error else ""
+    return f"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1"><title>ops</title>
-<style>body{{background:#E8E6E1;color:#16181D;font:15px/1.5 monospace;
+{NO_FLASH_SCRIPT}
+<style>{THEME_VARS}
+*{{box-sizing:border-box}}
+body{{background:{FIELD};color:{INK};font:15px/1.5 'IBM Plex Mono',ui-monospace,monospace;
 display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}
 form{{display:flex;flex-direction:column;gap:10px;width:240px}}
-input{{font:15px monospace;padding:10px;border:1px solid #C9C5BC;background:#fff}}
-button{{font:13px monospace;text-transform:uppercase;letter-spacing:.08em;padding:10px;
-background:#16181D;color:#E8E6E1;border:none;cursor:pointer}}
-.err{{color:#A8431C;font-size:12px}}</style></head><body>
-<form method="post">{error}
+input{{font:15px 'IBM Plex Mono',monospace;padding:10px;border:1px solid {RULE};
+background:{FIELD};color:{INK}}}
+button{{font:13px 'IBM Plex Mono',monospace;text-transform:uppercase;letter-spacing:.08em;padding:10px;
+background:{INK};color:{FIELD};border:none;cursor:pointer}}
+.err{{color:{ALERT};font-size:12px}}</style></head><body>
+<form method="post">{err_html}
 <input type="password" name="password" placeholder="password" autofocus required>
-<button type="submit">Enter</button></form></body></html>"""
+<button type="submit">Enter</button></form>
+</body></html>"""
 
 
 def create_app():
@@ -46,25 +59,25 @@ def create_app():
 
     @app.errorhandler(google_auth.NotAuthorized)
     def not_authorized(e):
-        return (f'<p class="sub" style="color:#A8431C">Not connected to Google yet — '
+        return (f'<p class="sub" style="color:{ALERT}">Not connected to Google yet — '
                f'<a href="/oauth/google/start">connect</a>.</p>', 409)
 
     # ---- auth -------------------------------------------------------------
 
     @app.get("/login")
     def login_form():
-        return LOGIN_PAGE.format(error="")
+        return render_login()
 
     @app.post("/login")
     def login():
         try:
             ok = auth.check_password(request.form.get("password", ""))
         except RuntimeError:
-            return LOGIN_PAGE.format(error='<p class="err">APP_PASSWORD not configured server-side.</p>')
+            return render_login("APP_PASSWORD not configured server-side.")
         if ok:
             session["authed"] = True
             return redirect(request.args.get("next") or url_for("daily"))
-        return LOGIN_PAGE.format(error='<p class="err">Wrong password.</p>')
+        return render_login("Wrong password.")
 
     @app.get("/logout")
     def logout():

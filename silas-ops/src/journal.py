@@ -4,21 +4,28 @@ order with no repeats, reshuffle once exhausted). Today's draw is cached
 in settings so reloading the page mid-day doesn't silently swap prompts
 out from under a half-written entry.
 
-Each day's entry saves to journal/YYYY-MM-DD.md and mirrors to Drive via
-drive.py (drive.file scope — the app can only ever see files it created).
-Nothing here ever reads that file back for anything but the save/sync path
-itself — see the privacy note in db.py and the build spec.
+Each day's entry saves to <DATA_DIR>/journal/YYYY-MM-DD.md and mirrors to
+Drive via drive.py (drive.file scope — the app can only ever see files it
+created). Nothing here ever reads that file back for anything but the
+save/sync path itself — see the privacy note in db.py and the build spec.
+
+DATA_DIR defaults to "data" locally (so this is data/journal/ in local
+dev — same root db.py's ops.db lives under) but on Render points at the
+mounted persistent disk, same as db.py — see render.yaml's `disk` block.
+Without it, journal entries would sit on Render's default ephemeral
+filesystem and get wiped on every redeploy.
 """
 
 from __future__ import annotations
 import json
+import os
 import random
 from datetime import date
 from pathlib import Path
 
 from . import db, drive
 
-JOURNAL_DIR = Path("journal")
+JOURNAL_DIR = Path(os.environ.get("DATA_DIR", "data")) / "journal"
 
 
 def todays_rotating_prompt() -> dict | None:

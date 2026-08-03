@@ -10,19 +10,27 @@
 # notes) — not something to fix here. A Raspberry Pi + Tailscale setup is
 # the natural upgrade later if that becomes annoying.
 #
-# data/ops.db and journal/ live on Render's ephemeral disk by default,
-# which is wiped on every deploy. Either attach a Render persistent disk
-# (paid) or accept that redeploys reset the DB — for a free-tier personal
-# project, the pragmatic move is a paid 1GB disk once this is actually in
-# daily use, or an early self-migration to the Pi.
+# data/ops.db and journal/ (under DATA_DIR below) live on the disk block —
+# a real Render persistent disk, not the service's default ephemeral one,
+# so they survive redeploys. Render disks require a paid plan (free-tier
+# services can't attach one), which is why `plan` is `starter` here, not
+# `free` — check current Starter pricing before deploying; this changes
+# the cost of running this from $0/mo. Deploy caveat that comes with any
+# disk: no zero-downtime deploys (Render can't run two instances against
+# one disk at once), so each deploy has a brief gap, not just a cold
+# start — a non-issue for a 1-2x/day personal dashboard.
 services:
   - type: web
     name: silas-ops
     runtime: python
     rootDir: silas-ops
-    plan: free
+    plan: starter
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    disk:
+      name: silas-ops-data
+      mountPath: /var/data
+      sizeGB: 1
     envVars:
       - key: APP_PASSWORD
         sync: false
@@ -30,3 +38,5 @@ services:
         generateValue: true
       - key: PYTHON_VERSION
         value: 3.11.15
+      - key: DATA_DIR
+        value: /var/data
