@@ -16,7 +16,7 @@ from datetime import date, timedelta
 
 from flask import Flask, jsonify, redirect, request, session, url_for
 
-from src import auth, db, google_auth, gtasks, journal, push, strava
+from src import auth, backup, db, google_auth, gtasks, journal, push, strava
 from src.assemble import build
 from src.assemble_plan import build_plan
 from src.assemble_reflect import build_reflect, HEATMAP_WEEKS
@@ -376,6 +376,21 @@ def create_app():
     @app.get("/healthz")
     def healthz():
         return "ok"
+
+    @app.post("/internal/backup")
+    def internal_backup():
+        # Bearer-token gated, not session-gated — GitHub Actions triggers
+        # this on a weekly cron and has no browser to log in with. See
+        # src/backup.py for why this needs an external trigger at all.
+        header = request.headers.get("Authorization", "")
+        token = header[7:] if header.startswith("Bearer ") else ""
+        try:
+            if not auth.check_backup_token(token):
+                return jsonify({"ok": False, "error": "bad token"}), 403
+        except RuntimeError as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+        result = backup.run()
+        return jsonify(result), (200 if result["ok"] else 500)
 
     push.start_background_loop(app)
     return app

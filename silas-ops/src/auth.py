@@ -20,6 +20,16 @@ def check_password(candidate: str) -> bool:
     return hmac.compare_digest(candidate, real)
 
 
+def check_backup_token(candidate: str) -> bool:
+    """Separate secret from APP_PASSWORD: the weekly backup is triggered
+    by a GitHub Actions cron job, not a browser session, so it needs a
+    bearer token it can hold as a repo secret rather than a login cookie."""
+    real = os.environ.get("BACKUP_TOKEN", "")
+    if not real:
+        raise RuntimeError("BACKUP_TOKEN env var is not set")
+    return hmac.compare_digest(candidate, real)
+
+
 def login_required(view):
     @wraps(view)
     def wrapped(*a, **kw):

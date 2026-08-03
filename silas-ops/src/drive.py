@@ -38,6 +38,30 @@ def _folder_id(svc) -> str:
     return fid
 
 
+def upload_backup(path: Path, keep: int = 6) -> None:
+    """Uploads path as a brand-new file (never overwrites — each backup
+    keeps its own dated name, unlike sync_file()'s update-by-name), then
+    deletes the oldest ops-backup-* files beyond `keep` so the folder
+    doesn't grow forever, but a bad week's dump still can't wipe out the
+    last several good copies at once. Unlike sync_file(), this raises
+    instead of swallowing errors — a backup that silently fails defeats
+    the point of having a safety net, so the caller (backup.run()) needs
+    to see it."""
+    from googleapiclient.http import MediaFileUpload
+
+    svc = _service()
+    folder_id = _folder_id(svc)
+    media = MediaFileUpload(str(path), mimetype="application/x-sqlite3")
+    svc.files().create(body={"name": path.name, "parents": [folder_id]},
+                       media_body=media, fields="id").execute()
+
+    existing = svc.files().list(
+        q=f"name contains 'ops-backup-' and '{folder_id}' in parents and trashed=false",
+        spaces="drive", fields="files(id,name)", orderBy="name desc").execute().get("files", [])
+    for f in existing[keep:]:
+        svc.files().delete(fileId=f["id"]).execute()
+
+
 def sync_file(path: Path) -> bool:
     """Best-effort mirror of a local file to the journal Drive folder.
     Returns False (never raises) if Google isn't connected — journaling

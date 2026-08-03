@@ -11,6 +11,7 @@ dashboard without opening the web app.
   python -m src.cli strength    log a strength set: exercise sets reps lb
   python -m src.cli weigh 148   log a weigh-in
   python -m src.cli check       config sanity check, no network
+  python -m src.cli backup      run the weekly Turso->Drive backup now
 """
 
 from __future__ import annotations
@@ -115,6 +116,13 @@ def cmd_check():
     sys.exit(0 if ok else 1)
 
 
+def cmd_backup():
+    from . import backup
+    result = backup.run()
+    print(result)
+    sys.exit(0 if result["ok"] else 1)
+
+
 def main():
     db.init()
     cmd = sys.argv[1] if len(sys.argv) > 1 else "today"
@@ -126,7 +134,8 @@ def main():
      "push-keys": cmd_push_keys,
      "strength": lambda: cmd_strength(rest),
      "weigh": lambda: cmd_weigh(rest),
-     "check": cmd_check}.get(cmd, lambda: print(__doc__))()
+     "check": cmd_check,
+     "backup": cmd_backup}.get(cmd, lambda: print(__doc__))()
 
 
 if __name__ == "__main__":
