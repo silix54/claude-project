@@ -16,9 +16,13 @@ CSS_EXTRA = f"""
 .qcell h4{{font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:600;
  display:flex;justify-content:space-between;margin-bottom:8px}}
 .qcell h4 b{{font-variant-numeric:tabular-nums;font-weight:600}}
-.qpills{{display:flex;flex-wrap:wrap;gap:5px}}
-.qpill{{border:1px solid;border-radius:3px;padding:3px 8px;font-size:11px;
- max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.qtasks{{display:flex;flex-direction:column}}
+.qtask{{display:flex;align-items:center;gap:6px;padding:4px 0;border-bottom:1px solid {RULE}}}
+.qtask:last-child{{border-bottom:none}}
+.qtext{{flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.qsel{{font:10px 'IBM Plex Mono',monospace;letter-spacing:.04em;text-transform:uppercase;
+ background:{FIELD};border:1px solid {RULE};color:{INK};padding:2px 4px;flex-shrink:0;
+ max-width:92px}}
 .qempty{{color:{MUTE};font-size:11px;font-style:italic}}
 .qunsorted{{margin-top:12px;padding-top:10px;border-top:1px solid {RULE}}}
 @media(max-width:520px){{.qmatrix{{grid-template-columns:1fr}}}}
@@ -114,24 +118,46 @@ def triage_done_row() -> str:
     return '<li style="opacity:.4">triaged</li>'
 
 
+def _qtask_row(t, current_key: str) -> str:
+    """One task inside a quadrant cell, with a native <select> to move it
+    to another quadrant — the whole point of the matrix being interactive
+    rather than a read-only mirror of the notes field. A native select
+    over drag-and-drop deliberately: on a phone it opens the OS's own
+    picker (one tap, no fiddly dragging on a small touch target), and it
+    needs zero extra JS beyond the htmx already used everywhere else in
+    this file. Changing it re-renders the whole matrix (see
+    quadrant_matrix's wrapper id) since a move changes two cells, not
+    just this one."""
+    opts = [f'<option value=""{" selected" if current_key == "none" else ""}>Unsorted</option>']
+    opts += [f'<option value="{k}"{" selected" if k == current_key else ""}>{QUADRANT_LABELS[k]}</option>'
+            for k in ("now", "plan", "quick", "drop")]
+    return f"""<div class="qtask"><span class="qtext">{esc(t.text)}</span>
+<select class="qsel" name="to" aria-label="Move &quot;{esc(t.text)}&quot; to quadrant"
+ hx-post="/plan/quadrant/{t.id}" hx-trigger="change"
+ hx-target="#quadrant-matrix" hx-swap="outerHTML">{"".join(opts)}</select></div>"""
+
+
 def _qcell(key: str, tasks: list) -> str:
     color = QUADRANT_COLORS[key]
-    pills = "".join(f'<span class="qpill" style="border-color:{color};color:{color}">'
-                    f'{esc(t.text)}</span>' for t in tasks)
-    body = pills or '<span class="qempty">Empty</span>'
+    rows = "".join(_qtask_row(t, key) for t in tasks)
+    body = rows or '<span class="qempty">Empty</span>'
     return (f'<div class="qcell"><h4 style="color:{color}">{QUADRANT_LABELS[key]} '
-           f'<b>{len(tasks)}</b></h4><div class="qpills">{body}</div></div>')
+           f'<b>{len(tasks)}</b></h4><div class="qtasks">{body}</div></div>')
 
 
 def quadrant_matrix(by_quadrant: dict) -> str:
     """A second view of the exact same open-task list triage_list() shows,
     grouped into the four Eisenhower quadrants instead of one flat list —
     alongside triage, not instead of it. Tasks with no !quadrant tag get
-    their own row below the grid rather than disappearing from view."""
+    their own row below the grid rather than disappearing from view.
+    Wrapped in one id'd div so a single quadrant change (see
+    _qtask_row's select) can swap the entire matrix in one htmx request —
+    a move affects the source and destination cell at once, so a single
+    cell can't be swapped in isolation."""
     grid = "".join(_qcell(k, by_quadrant[k]) for k in ("now", "plan", "quick", "drop"))
     unsorted = by_quadrant.get("none", [])
     unsorted_html = f'<div class="qunsorted">{_qcell("none", unsorted)}</div>' if unsorted else ""
-    return f'<div class="qmatrix">{grid}</div>{unsorted_html}'
+    return f'<div id="quadrant-matrix"><div class="qmatrix">{grid}</div>{unsorted_html}</div>'
 
 
 def _commit(weekly_focus) -> str:

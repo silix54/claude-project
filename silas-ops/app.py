@@ -22,7 +22,7 @@ from src.assemble_plan import build_plan
 from src.assemble_reflect import build_reflect, HEATMAP_WEEKS
 from src.chrome import FIELD, INK, RULE, ALERT, THEME_VARS, NO_FLASH_SCRIPT
 from src.render import render, esc, _tasks as render_tasks
-from src.render_plan import render_plan, triage_list, commit_section
+from src.render_plan import render_plan, triage_list, commit_section, quadrant_matrix
 from src.render_reflect import render_reflect, devotions_block, mood_form, ring_col
 from src.render_settings import render_settings
 
@@ -135,6 +135,21 @@ def create_app():
                 from datetime import timedelta
                 gtasks.set_due(task_id, monday_of(date.today()) + timedelta(days=6))
         return f'<li id="triage-{task_id}" style="opacity:.4">triaged — {action}</li>'
+
+    @app.post("/plan/quadrant/<task_id>")
+    @auth.login_required
+    def plan_quadrant(task_id):
+        to = request.form.get("to") or None
+        if to not in (None, "now", "plan", "quick", "drop"):
+            return "", 400
+        tasks = gtasks.load()
+        t = next((x for x in tasks if x.id == task_id), None)
+        if t:
+            gtasks.patch_meta(task_id, t.tag, to, t.est_minutes)
+            # Mutate in place rather than a second gtasks.load() round trip
+            # to the Tasks API — patch_meta already wrote it there.
+            t.quadrant = to
+        return quadrant_matrix(gtasks.open_by_quadrant(tasks))
 
     @app.post("/plan/commit")
     @auth.login_required
