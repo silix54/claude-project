@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from . import db, google_auth
@@ -174,6 +174,41 @@ def stalled_tasks(tasks: list[GTask]) -> list[GTask]:
 
 def completed_since(tasks: list[GTask], since: date) -> list[GTask]:
     return [t for t in tasks if t.done and t.completed_at and t.completed_at >= since]
+
+
+def open_by_quadrant(tasks: list[GTask]) -> dict[str, list[GTask]]:
+    """Open tasks grouped into the four Eisenhower quadrants for the /plan
+    matrix — a second view of the same triage list, not a replacement.
+    Tasks with no !quadrant tag land under "none" rather than silently
+    dropping out of the view; the matrix renders that separately."""
+    out = {"now": [], "plan": [], "quick": [], "drop": [], "none": []}
+    for t in open_tasks(tasks):
+        out[t.quadrant or "none"].append(t)
+    return out
+
+
+def completed_by_week_quadrant(tasks: list[GTask], weeks: int = 6) -> list[dict]:
+    """Completed-task counts per quadrant, bucketed into the last `weeks`
+    ISO weeks (Monday-start, oldest first, including the current
+    in-progress week). Answers "was this week reactive (now/quick) or
+    deliberate (plan)" — the quadrant a task carries at read time, which
+    for a completed task is whatever it was tagged when it was closed
+    out, not necessarily what it was tagged at creation."""
+    from .periodization import monday_of
+
+    this_monday = monday_of(date.today())
+    week_starts = [this_monday - timedelta(weeks=i) for i in range(weeks - 1, -1, -1)]
+    buckets = {ws: {"now": 0, "plan": 0, "quick": 0, "drop": 0, "none": 0, "total": 0}
+              for ws in week_starts}
+    for t in tasks:
+        if not t.done or not t.completed_at:
+            continue
+        wk = monday_of(t.completed_at)
+        if wk in buckets:
+            key = t.quadrant or "none"
+            buckets[wk][key] += 1
+            buckets[wk]["total"] += 1
+    return [{"week_of": ws, **buckets[ws]} for ws in week_starts]
 
 
 def committed_minutes(tasks: list[GTask]) -> int:

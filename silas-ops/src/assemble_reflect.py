@@ -6,8 +6,9 @@ docstring in render_reflect.py."""
 from __future__ import annotations
 from datetime import date, timedelta
 
-from . import db, journal, reflect
-from .render_reflect import habit_heatmap, habit_toggle_row, mood_chart, correlation_summary
+from . import db, gtasks, journal, reflect
+from .chrome import HABIT_COLORS
+from .render_reflect import habit_heatmap, habit_ring_row, mood_chart, correlation_summary
 
 HEATMAP_WEEKS = 12
 
@@ -32,11 +33,16 @@ def build_reflect(today: date | None = None) -> dict:
         streak += 1
         cur -= timedelta(days=1)
 
+    tasks = gtasks.load()
+    quadrant_weekly = gtasks.completed_by_week_quadrant(tasks)
+    habit_colors = {h["name"]: HABIT_COLORS.get(h.get("color"), "var(--text-muted)") for h in habits}
+
     return {
         "heatmap": habit_heatmap(habits, logs_by_habit, weeks=HEATMAP_WEEKS),
-        "habit_toggles": habit_toggle_row(habits, done_today),
+        "habit_rings": habit_ring_row(habits, logs_by_habit, done_today),
         "mood_chart": mood_chart(stability_rows),
-        "correlation": correlation_summary(links),
+        "quadrant_weekly": quadrant_weekly,
+        "correlation": correlation_summary(links, habit_colors),
         "devotions_done_today": done_today_devo,
         "devotions_streak": streak,
         "mood_logged_today": any(r["date"] == today.isoformat() for r in mood_rows),

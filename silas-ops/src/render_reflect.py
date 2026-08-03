@@ -9,32 +9,77 @@ import html
 from datetime import date, timedelta
 
 from .render import FIELD, INK, SIGNAL, ALERT, MUTE, RULE, SUCCESS, esc
-from .chrome import NO_FLASH_SCRIPT, THEME_TOGGLE_TAG, nav_bar
+from .chrome import (NO_FLASH_SCRIPT, THEME_TOGGLE_TAG, nav_bar,
+                     QUADRANT_COLORS, QUADRANT_LABELS, HABIT_COLORS)
 
 CELL, GAP = 12, 3
 
 
-def habit_toggle_row(habits: list[dict], done_today: dict[int, bool]) -> str:
-    """Tap-to-log for today, sitting above the heatmap it feeds."""
+def _habit_color(h: dict) -> str:
+    """Identity color for this habit — which habit this is, cycled at
+    creation (db.add_habit), stable across sessions. Unrelated to the
+    quadrant colors (chrome.QUADRANT_COLORS): those mean task urgency,
+    this means "which habit," and the two are never mixed at a call site.
+    Falls back to neutral MUTE for any pre-migration row that somehow
+    still has no color (shouldn't happen — db.init() backfills it)."""
+    return HABIT_COLORS.get(h.get("color"), MUTE)
+
+
+def _streak(logs: dict[str, bool], today: date) -> int:
+    streak, cur = 0, today
+    while logs.get(cur.isoformat()):
+        streak += 1
+        cur -= timedelta(days=1)
+    return streak
+
+
+def ring_col(h: dict, done: bool, streak: int) -> str:
+    """One ring, standalone-renderable so the toggle route can hand back
+    just this fragment and have it swap itself in place — hx-swap="none"
+    (what the old chip row used) posts the toggle but never touches the
+    DOM, so the ring would say "filled if logged done today" and then not
+    actually fill until the next full page load. Outline is always the
+    habit's identity color (readable even before tapping); filled the
+    same color once done. Streak stays a fixed, already-AA-checked color
+    (ink when done, muted when not) rather than the habit color — see
+    habit_heatmap()'s docstring for why the identity palette can't carry
+    body text/foreground content directly."""
+    color = _habit_color(h)
+    fill = f'<circle cx="22" cy="22" r="17" fill="{color}" opacity="0.22"/>' if done else ""
+    return f"""<div class="hring-col">
+<button class="hring" hx-post="/reflect/habit/{h['id']}/toggle" hx-target="closest .hring-col"
+ hx-swap="outerHTML" aria-label="Toggle {esc(h['name'])}, logged {'done' if done else 'not done'} today">
+<svg viewBox="0 0 44 44" width="44" height="44" aria-hidden="true">
+{fill}<circle cx="22" cy="22" r="17" fill="none" stroke="{color}" stroke-width="2.5"
+ opacity="{1 if done else 0.4}"/>
+<text x="22" y="27" text-anchor="middle" font-size="13" font-weight="600"
+ fill="{INK if done else MUTE}">{streak}</text>
+</svg></button>
+<span class="hring-name">{esc(h['name'])}</span></div>"""
+
+
+def habit_ring_row(habits: list[dict], logs_by_habit: dict[int, dict[str, bool]],
+                   done_today: dict[int, bool]) -> str:
+    """Today's status per habit, one SVG ring each. Tapping toggles today's
+    log — same htmx endpoint the old chip row used — and the ring itself
+    swaps to reflect the new state immediately; see ring_col()."""
     if not habits:
         return ""
-    chips = "".join(
-        f"""<button hx-post="/reflect/habit/{h['id']}/toggle" hx-target="closest section" hx-swap="none"
-        style="border-color:{SUCCESS if done_today.get(h['id']) else RULE};
-        color:{SUCCESS if done_today.get(h['id']) else INK}">
-        {esc(h['name'])} {'✓' if done_today.get(h['id']) else ''}</button>"""
-        for h in habits)
-    return f'<div class="chips" style="margin-bottom:10px">{chips}</div>'
-
-
-def _color_for(done: bool | None) -> str:
-    if done is None:
-        return RULE               # no data that day (habit didn't exist yet)
-    return INK if done else "#FFFFFF00"  # filled if done, transparent if skipped
+    today = date.today()
+    cols = [ring_col(h, done_today.get(h["id"], False), _streak(logs_by_habit.get(h["id"], {}), today))
+           for h in habits]
+    return f'<div class="hrings">{"".join(cols)}</div>'
 
 
 def habit_heatmap(habits: list[dict], logs_by_habit: dict[int, dict[str, bool]],
                   weeks: int = 12) -> str:
+    """Filled cells use each habit's own identity color instead of one
+    generic fill, so a row is recognizable by color alone. The habit-name
+    label itself stays plain ink text rather than taking that color
+    directly — three of the five identity colors don't clear the >=4.5:1
+    AA text threshold (they're only checked to the decorative >=3:1 bar,
+    since a ring/cell fill isn't body text) — identity is conveyed via a
+    small swatch dot next to the name instead."""
     if not habits:
         return '<p class="empty">No habits yet. Add one in Settings.</p>'
     days = weeks * 7
@@ -44,17 +89,20 @@ def habit_heatmap(habits: list[dict], logs_by_habit: dict[int, dict[str, bool]],
     rows = []
     for h in habits:
         logs = logs_by_habit.get(h["id"], {})
+        color = _habit_color(h)
+
+        def cell_color(done):
+            if done is None:
+                return RULE          # no data that day (habit didn't exist yet)
+            return color if done else "#FFFFFF00"  # filled if done, transparent if skipped
+
         cells = "".join(
-            f'<span class="cell" style="background:{_color_for(logs.get(d.isoformat()))}" '
+            f'<span class="cell" style="background:{cell_color(logs.get(d.isoformat()))}" '
             f'title="{d.isoformat()}"></span>' for d in dates)
-        streak = 0
-        cur = today
-        while logs.get(cur.isoformat()):
-            streak += 1
-            cur -= timedelta(days=1)
-        rows.append(f'<div class="hrow"><span class="hname">{esc(h["name"])}</span>'
+        rows.append(f'<div class="hrow"><span class="hname">'
+                    f'<i class="hswatch" style="background:{color}"></i>{esc(h["name"])}</span>'
                     f'<span class="hgrid">{cells}</span>'
-                    f'<span class="hstreak">{streak}d</span></div>')
+                    f'<span class="hstreak">{_streak(logs, today)}d</span></div>')
     return f'<div class="heat">{"".join(rows)}</div>'
 
 
@@ -121,21 +169,73 @@ def mood_chart(rows: list[dict], days: int = 30, width: int = 760, height: int =
     solid = mood, dashed = energy</p>"""
 
 
-def correlation_summary(links) -> str:
+def quadrant_chart(weekly: list[dict], width: int = 760, height: int = 150) -> str:
+    """One 100%-stacked bar per week (last 6), proportion of that week's
+    completed tasks in each Eisenhower quadrant — same 4 colors as the
+    /plan matrix (chrome.QUADRANT_COLORS), so the two features read as one
+    system. Stacked by proportion rather than raw count so a slow week and
+    a busy week are still comparable in composition, which is the actual
+    question this answers: reactive or deliberate, not how much got done."""
+    if not any(w["total"] for w in weekly):
+        return '<p class="empty">No completed, quadrant-tagged tasks yet.</p>'
+
+    top, bottom, gap = 8, height - 24, 8
+    n = len(weekly)
+    bar_w = (width - gap * (n + 1)) / n
+    bars = []
+    for i, w in enumerate(weekly):
+        x = gap + i * (bar_w + gap)
+        total = w["total"]
+        if not total:
+            bars.append(f'<rect x="{x:.1f}" y="{bottom-2:.1f}" width="{bar_w:.1f}" '
+                       f'height="2" fill="{RULE}"/>')
+        else:
+            y = bottom
+            for key in ("now", "plan", "quick"):
+                v = w[key]
+                if not v:
+                    continue
+                seg_h = v / total * (bottom - top)
+                y -= seg_h
+                bars.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w:.1f}" '
+                           f'height="{seg_h:.1f}" fill="{QUADRANT_COLORS[key]}"/>')
+            other = w["drop"] + w["none"]
+            if other:
+                seg_h = other / total * (bottom - top)
+                y -= seg_h
+                bars.append(f'<rect x="{x:.1f}" y="{y:.1f}" width="{bar_w:.1f}" '
+                           f'height="{seg_h:.1f}" fill="{MUTE}"/>')
+        bars.append(f'<text x="{x + bar_w / 2:.1f}" y="{height - 6}" font-size="9" '
+                   f'fill="{MUTE}" text-anchor="middle">{w["week_of"].strftime("%b %-d")}</text>')
+
+    legend = "".join(f'<span><i style="background:{QUADRANT_COLORS[k]}"></i>{QUADRANT_LABELS[k]}</span>'
+                     for k in ("now", "plan", "quick", "drop"))
+    return f"""<svg viewBox="0 0 {width} {height}" width="100%" height="{height}"
+      role="img" aria-label="Completed tasks by quadrant, last 6 weeks">
+      {"".join(bars)}
+    </svg>
+    <div class="qlegend">{legend}</div>
+    <p class="sub">Share of each week's completed tasks by quadrant — reactive (now/quick)
+    vs. deliberate (plan) at a glance, not how much got done.</p>"""
+
+
+def correlation_summary(links, colors: dict[str, str] | None = None) -> str:
+    colors = colors or {}
     if not links:
         return '<p class="empty">No habits yet.</p>'
     rows = []
     for l in links:
+        swatch = f'<i class="hswatch" style="background:{colors.get(l.habit, MUTE)}"></i>'
         if not l.confident:
             need = max(0, 14 - (l.n_with + l.n_without))
-            rows.append(f'<li class="dim"><b>{esc(l.habit)}</b>'
+            rows.append(f'<li class="dim"><b>{swatch}{esc(l.habit)}</b>'
                         f'<span>not enough overlapping days yet'
                         f'{f" — about {need} more" if need else ""}</span></li>')
             continue
         md = l.mood_delta
         direction = "higher" if (md or 0) > 0 else "lower" if (md or 0) < 0 else "no difference in"
         rows.append(
-            f'<li><b>{esc(l.habit)}</b><span>mood {abs(md) if md else 0} points {direction} '
+            f'<li><b>{swatch}{esc(l.habit)}</b><span>mood {abs(md) if md else 0} points {direction} '
             f'on days you did it ({l.mood_with} vs {l.mood_without}, n={l.n_with}/{l.n_without}) '
             f'· r={l.r_mood}</span></li>')
     return (f'<ul class="corr">{"".join(rows)}</ul>'
@@ -144,14 +244,26 @@ def correlation_summary(links) -> str:
 
 
 CSS_EXTRA = f"""
+.qlegend{{display:flex;gap:14px;flex-wrap:wrap;margin-top:8px;font-size:10px;
+ color:{MUTE};letter-spacing:.06em;text-transform:uppercase}}
+.qlegend span{{display:inline-flex;align-items:center;gap:5px}}
+.qlegend i{{display:inline-block;width:8px;height:8px;border-radius:1px}}
+.hswatch{{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;
+ flex:0 0 auto}}
+.hrings{{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px}}
+.hring-col{{display:flex;flex-direction:column;align-items:center;gap:4px;width:56px}}
+.hring{{background:none;border:none;padding:0;cursor:pointer;line-height:0}}
+.hring-name{{font-size:9px;color:{MUTE};text-align:center;line-height:1.2;max-width:56px;
+ overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
 .heat{{display:flex;flex-direction:column;gap:6px}}
 .hrow{{display:flex;align-items:center;gap:10px}}
-.hname{{flex:0 0 130px;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}
+.hname{{flex:0 0 150px;font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+ display:flex;align-items:center}}
 .hgrid{{display:flex;gap:{GAP}px;flex-wrap:nowrap;overflow-x:auto}}
 .cell{{width:{CELL}px;height:{CELL}px;border:1px solid {RULE};flex:0 0 auto;cursor:pointer}}
 .hstreak{{flex:0 0 32px;font-size:10px;color:{SIGNAL};text-align:right;font-variant-numeric:tabular-nums}}
 .corr li{{display:flex;gap:9px;padding:6px 0;border-bottom:1px solid {RULE};font-size:12.5px}}
-.corr li b{{flex:0 0 130px}}
+.corr li b{{flex:0 0 150px;display:flex;align-items:center}}
 .corr li.dim span{{color:{MUTE};font-style:italic}}
 .devo{{border:2px solid {INK};background:{FIELD};padding:14px 16px;margin-bottom:4px}}
 .devo.done{{border-color:{SUCCESS}}}
@@ -225,7 +337,8 @@ def render_reflect(state: dict) -> str:
 
 <div class="grid" style="grid-template-columns:1fr">
 <section><h2>Mood &amp; energy</h2>{state['mood_chart']}{mood_form(state['mood_logged_today'])}</section>
-<section><h2>Habits</h2>{state['habit_toggles']}{state['heatmap']}</section>
+<section><h2>Habits</h2>{state['habit_rings']}{state['heatmap']}</section>
+<section><h2>Quadrant mix — last 6 weeks</h2>{quadrant_chart(state['quadrant_weekly'])}</section>
 <section><h2>What tends to move with what</h2>{state['correlation']}</section>
 <section><h2>Journal</h2>{journal_form(state['journal_prompts'])}</section>
 </div>

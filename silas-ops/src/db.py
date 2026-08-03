@@ -24,6 +24,8 @@ from pathlib import Path
 
 import libsql_client
 
+from .chrome import HABIT_COLOR_NAMES
+
 DB_PATH = Path(os.environ.get("DATA_DIR", "data")) / "ops.db"
 TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
 TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
@@ -38,7 +40,11 @@ CREATE TABLE IF NOT EXISTS habits (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (date('now')),
-    archived_at TEXT
+    archived_at TEXT,
+    color TEXT               -- identity color name (see chrome.HABIT_COLOR_NAMES),
+                              -- assigned once at creation, cycled through the
+                              -- palette -- not a status color, unrelated to
+                              -- done/not-done
 );
 
 CREATE TABLE IF NOT EXISTS habit_logs (
@@ -253,10 +259,30 @@ def conn():
         c.close()
 
 
+def _migrate_habit_colors(c):
+    """CREATE TABLE IF NOT EXISTS in SCHEMA only helps brand-new databases
+    — it's a no-op against a `habits` table that already exists without a
+    `color` column, which is exactly the state of every database created
+    before this feature. Add the column by hand, then backfill: at the
+    moment this ALTER runs, every existing row is colorless by definition
+    (the column didn't exist a statement ago), so a single pass in id
+    order reproduces "cycle through in creation order" exactly. After
+    that, add_habit()'s own COUNT(*)-based assignment picks up the cycle
+    seamlessly for anything created afterward."""
+    cols = {r["name"] for r in c.execute("PRAGMA table_info(habits)")}
+    if "color" in cols:
+        return
+    c.execute("ALTER TABLE habits ADD COLUMN color TEXT")
+    for i, r in enumerate(c.execute("SELECT id FROM habits ORDER BY id")):
+        c.execute("UPDATE habits SET color=? WHERE id=?",
+                 (HABIT_COLOR_NAMES[i % len(HABIT_COLOR_NAMES)], r["id"]))
+
+
 def init():
     """Create tables and seed default prompts. Safe to call every startup."""
     with conn() as c:
         c.executescript(SCHEMA)
+        _migrate_habit_colors(c)
         if not c.execute("SELECT 1 FROM journal_prompts LIMIT 1").fetchone():
             for i, t in enumerate(DEFAULT_FIXED_PROMPTS):
                 c.execute("INSERT INTO journal_prompts (kind, text, position) VALUES (?,?,?)",
@@ -276,7 +302,12 @@ def init():
 
 def add_habit(name: str) -> int:
     with conn() as c:
-        cur = c.execute("INSERT INTO habits (name) VALUES (?)", (name,))
+        # Cycle by how many habits have ever existed (archived included),
+        # so the assignment is a pure function of creation order and never
+        # reused just because something got archived.
+        n = c.execute("SELECT COUNT(*) FROM habits").fetchone()[0]
+        color = HABIT_COLOR_NAMES[n % len(HABIT_COLOR_NAMES)]
+        cur = c.execute("INSERT INTO habits (name, color) VALUES (?,?)", (name, color))
         return cur.lastrowid
 
 
@@ -294,6 +325,12 @@ def list_habits(include_archived=False):
     q = "SELECT * FROM habits" + ("" if include_archived else " WHERE archived_at IS NULL")
     with conn() as c:
         return [dict(r) for r in c.execute(q + " ORDER BY id")]
+
+
+def get_habit(habit_id: int) -> dict | None:
+    with conn() as c:
+        r = c.execute("SELECT * FROM habits WHERE id=?", (habit_id,)).fetchone()
+        return dict(r) if r else None
 
 
 def log_habit(habit_id: int, d: date | None = None, done: bool = True):

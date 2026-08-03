@@ -18,11 +18,20 @@ reuses the app's original hex values except --text-muted (#6E7278 was
 darkened to #61646A, 4.76:1, same hue, still reads as "muted"). Dark mode
 derives every value from that same light palette: --bg reuses light
 --text as-is, --surface/--border lighten it for card separation, --text
-reuses light --bg, and the three accent colors are each blended 48%
-toward that same off-white — no independently-invented dark colors. Every
-pairing holds >=4.3:1 against both the page background and the card
-surface (most >=5:1); full numbers in the review that shipped with this
-change.
+reuses light --bg, and the accent colors are each blended toward that
+same off-white — no independently-invented dark colors. Status/text-grade
+colors (--signal/--alert/--success/--amber) hold >=4.5:1 against both the
+page and card backgrounds; the five --habit-* identity colors are
+decorative (rings, heatmap cells, swatches, never body text), checked to
+the lower >=3:1 WCAG 1.4.11 non-text/graphical-object threshold instead.
+
+Two separate color systems live here, deliberately not sharing hues:
+--signal/--alert/--amber/--text-muted are quadrant/status colors (what
+state something is in — urgent, informational, low-priority). The five
+--habit-* colors are identity colors (which habit this is — arbitrary,
+cycled by creation order, unrelated to any status). Keep them visually
+distinct at the call site too: don't recolor quadrant pills with a habit
+color or vice versa.
 """
 
 from __future__ import annotations
@@ -35,6 +44,16 @@ RULE = "var(--border)"
 SIGNAL = "var(--signal)"
 ALERT = "var(--alert)"
 SUCCESS = "var(--success)"
+AMBER = "var(--amber)"
+
+HABIT_COLOR_NAMES = ["violet", "teal", "rose", "ochre", "slate"]
+HABIT_COLORS = {name: f"var(--habit-{name})" for name in HABIT_COLOR_NAMES}
+
+# Shared by the /plan Eisenhower matrix and the /reflect quadrant-mix
+# chart, so both read as one system rather than two features that happen
+# to both touch quadrants.
+QUADRANT_COLORS = {"now": ALERT, "plan": SIGNAL, "quick": AMBER, "drop": MUTE, "none": MUTE}
+QUADRANT_LABELS = {"now": "Now", "plan": "Plan", "quick": "Quick", "drop": "Drop", "none": "Unsorted"}
 
 THEME_VARS = """
 :root {
@@ -46,6 +65,12 @@ THEME_VARS = """
   --signal: #1F4B99;
   --alert: #A8431C;
   --success: #146B39;
+  --amber: #855E0F;
+  --habit-violet: #6834B2;
+  --habit-teal: #2A928A;
+  --habit-rose: #B82E5C;
+  --habit-ochre: #6D8F1E;
+  --habit-slate: #5A718C;
 }
 :root[data-theme="dark"] {
   --bg: #16181D;
@@ -56,6 +81,12 @@ THEME_VARS = """
   --signal: #7F95BC;
   --alert: #C7917B;
   --success: #7AA68A;
+  --amber: #AB925F;
+  --habit-violet: #8E69C0;
+  --habit-teal: #63ABA4;
+  --habit-rose: #C66584;
+  --habit-ochre: #92A958;
+  --habit-slate: #8594A6;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -67,6 +98,12 @@ THEME_VARS = """
     --signal: #7F95BC;
     --alert: #C7917B;
     --success: #7AA68A;
+    --amber: #AB925F;
+    --habit-violet: #8E69C0;
+    --habit-teal: #63ABA4;
+    --habit-rose: #C66584;
+    --habit-ochre: #92A958;
+    --habit-slate: #8594A6;
   }
 }
 """

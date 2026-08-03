@@ -12,18 +12,18 @@ asked, and it hasn't been.
 from __future__ import annotations
 import os
 import secrets as pysecrets
-from datetime import date
+from datetime import date, timedelta
 
 from flask import Flask, jsonify, redirect, request, session, url_for
 
 from src import auth, db, google_auth, gtasks, journal, push, strava
 from src.assemble import build
 from src.assemble_plan import build_plan
-from src.assemble_reflect import build_reflect
+from src.assemble_reflect import build_reflect, HEATMAP_WEEKS
 from src.chrome import FIELD, INK, RULE, ALERT, THEME_VARS, NO_FLASH_SCRIPT
 from src.render import render, esc, _tasks as render_tasks
 from src.render_plan import render_plan, triage_list, commit_section
-from src.render_reflect import render_reflect, devotions_block, mood_form
+from src.render_reflect import render_reflect, devotions_block, mood_form, ring_col
 from src.render_settings import render_settings
 
 
@@ -160,10 +160,23 @@ def create_app():
     @app.post("/reflect/habit/<int:habit_id>/toggle")
     @auth.login_required
     def reflect_habit_toggle(habit_id):
-        logs = db.habit_logs(habit_id, date.today())
-        currently_done = logs.get(date.today().isoformat(), False)
-        db.log_habit(habit_id, done=not currently_done)
-        return "", 204
+        today = date.today()
+        # Wide enough window to walk a real multi-day streak, not just
+        # today's own entry — matches the range the heatmap/ring row use
+        # elsewhere so this toggle's streak number never disagrees with
+        # what a full page load would show.
+        logs = db.habit_logs(habit_id, today - timedelta(weeks=HEATMAP_WEEKS))
+        currently_done = logs.get(today.isoformat(), False)
+        new_done = not currently_done
+        db.log_habit(habit_id, done=new_done)
+
+        habit = db.get_habit(habit_id)
+        logs[today.isoformat()] = new_done
+        streak, cur = 0, today
+        while logs.get(cur.isoformat()):
+            streak += 1
+            cur -= timedelta(days=1)
+        return ring_col(habit, new_done, streak)
 
     @app.post("/reflect/mood")
     @auth.login_required

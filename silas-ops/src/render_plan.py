@@ -8,9 +8,21 @@ from __future__ import annotations
 from datetime import timedelta
 
 from .render import CSS, FIELD, INK, SIGNAL, ALERT, MUTE, RULE, SUCCESS, esc, dur
-from .chrome import NO_FLASH_SCRIPT, THEME_TOGGLE_TAG, nav_bar
+from .chrome import NO_FLASH_SCRIPT, THEME_TOGGLE_TAG, nav_bar, QUADRANT_COLORS, QUADRANT_LABELS
 
 CSS_EXTRA = f"""
+.qmatrix{{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px}}
+.qcell{{border:1px solid {RULE};padding:10px 11px 12px}}
+.qcell h4{{font-size:10px;letter-spacing:.14em;text-transform:uppercase;font-weight:600;
+ display:flex;justify-content:space-between;margin-bottom:8px}}
+.qcell h4 b{{font-variant-numeric:tabular-nums;font-weight:600}}
+.qpills{{display:flex;flex-wrap:wrap;gap:5px}}
+.qpill{{border:1px solid;border-radius:3px;padding:3px 8px;font-size:11px;
+ max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}
+.qempty{{color:{MUTE};font-size:11px;font-style:italic}}
+.qunsorted{{margin-top:12px;padding-top:10px;border-top:1px solid {RULE}}}
+@media(max-width:520px){{.qmatrix{{grid-template-columns:1fr}}}}
+
 .triage li{{display:flex;gap:9px;padding:7px 0;border-bottom:1px solid {RULE};
  align-items:center;font-size:12.5px}}
 .triage .tt{{flex:1}}
@@ -102,6 +114,26 @@ def triage_done_row() -> str:
     return '<li style="opacity:.4">triaged</li>'
 
 
+def _qcell(key: str, tasks: list) -> str:
+    color = QUADRANT_COLORS[key]
+    pills = "".join(f'<span class="qpill" style="border-color:{color};color:{color}">'
+                    f'{esc(t.text)}</span>' for t in tasks)
+    body = pills or '<span class="qempty">Empty</span>'
+    return (f'<div class="qcell"><h4 style="color:{color}">{QUADRANT_LABELS[key]} '
+           f'<b>{len(tasks)}</b></h4><div class="qpills">{body}</div></div>')
+
+
+def quadrant_matrix(by_quadrant: dict) -> str:
+    """A second view of the exact same open-task list triage_list() shows,
+    grouped into the four Eisenhower quadrants instead of one flat list —
+    alongside triage, not instead of it. Tasks with no !quadrant tag get
+    their own row below the grid rather than disappearing from view."""
+    grid = "".join(_qcell(k, by_quadrant[k]) for k in ("now", "plan", "quick", "drop"))
+    unsorted = by_quadrant.get("none", [])
+    unsorted_html = f'<div class="qunsorted">{_qcell("none", unsorted)}</div>' if unsorted else ""
+    return f'<div class="qmatrix">{grid}</div>{unsorted_html}'
+
+
 def _commit(weekly_focus) -> str:
     chips = "".join(f"<span>{esc(p)}</span>" for p in weekly_focus)
     return f"""
@@ -135,7 +167,8 @@ def render_plan(state: dict) -> str:
 <div class="grid" style="grid-template-columns:1fr">
 <section><h2>1. Review — last 7 days</h2>{_review(state['review'])}</section>
 <section><h2>2. Ahead — next 7 days</h2>{_ahead(state['ahead'])}</section>
-<section><h2>3. Triage</h2>{triage_list(state['triage_tasks'])}</section>
+<section><h2>3. Triage</h2>{triage_list(state['triage_tasks'])}
+<h3>Eisenhower matrix</h3>{quadrant_matrix(state['by_quadrant'])}</section>
 <section><h2>4. Commit — this week's focus</h2>
 <div id="commit-section">{_commit(state['weekly_focus'])}</div></section>
 </div>

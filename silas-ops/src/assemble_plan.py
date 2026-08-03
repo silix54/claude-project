@@ -89,5 +89,6 @@ def build_plan(today: date | None = None) -> dict:
         "review": review(today, train),
         "ahead": ahead(today, term, train),
         "triage_tasks": T.open_tasks(tasks),
+        "by_quadrant": T.open_by_quadrant(tasks),
         "weekly_focus": db.weekly_focus(),
     }
