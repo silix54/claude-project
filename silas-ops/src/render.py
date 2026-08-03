@@ -68,7 +68,7 @@ def day_bar(s):
     return f'<div class="bar">{"".join(segs)}{ticks}{nowline}</div>'
 
 
-QUICKADD_TASK = """<form class="quickadd" hx-post="/quickadd/task" hx-target="#slate" hx-swap="outerHTML">
+QUICKADD_TASK = """<form class="quickadd" hx-post="/quickadd/task" hx-target="#slate" hx-swap="outerHTML swap:140ms settle:140ms">
 <input type="text" name="title" placeholder="New task" required>
 <select name="quadrant"><option value="">quadrant</option>
 <option value="now">now</option><option value="plan">plan</option>
@@ -138,7 +138,7 @@ def _training(s):
                        for a in reversed(recent))
         recent_html = f'<h3>Recent (Strava)</h3><ul class="sess">{rows}</ul>'
     quickadd = """<h3>Log strength</h3>
-<form class="quickadd" hx-post="/quickadd/strength" hx-target="this" hx-swap="outerHTML">
+<form class="quickadd" hx-post="/quickadd/strength" hx-target="this" hx-swap="outerHTML swap:140ms settle:140ms">
 <input type="text" name="exercise" placeholder="Exercise" required>
 <input type="number" name="sets" placeholder="sets" style="width:52px">
 <input type="number" name="reps" placeholder="reps" style="width:52px">
@@ -271,7 +271,11 @@ footer{{margin-top:34px;padding-top:9px;border-top:1px solid {RULE};font-size:10
 @media(max-width:900px){{.grid{{grid-template-columns:1fr}}.blk span{{display:none}}}}
 @media(prefers-reduced-motion:no-preference){{section{{animation:f .4s ease both}}
  section:nth-child(2){{animation-delay:.06s}}section:nth-child(3){{animation-delay:.12s}}
- @keyframes f{{from{{opacity:0;transform:translateY(6px)}}}}}}
+ @keyframes f{{from{{opacity:0;transform:translateY(6px)}}}}
+ .htmx-swapping{{opacity:0;transition:opacity 140ms ease}}
+ .htmx-added{{opacity:0}}
+ .htmx-settling{{opacity:1;transition:opacity 140ms ease}}
+}}
 """ + NAV_CSS
 
 

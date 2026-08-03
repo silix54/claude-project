@@ -69,7 +69,7 @@ def _review(r) -> str:
 {guard}
 {stalled}
 <h3>Weight check-in</h3>
-<form class="wt" hx-post="/plan/weight" hx-swap="outerHTML" hx-target="closest form">
+<form class="wt" hx-post="/plan/weight" hx-swap="outerHTML swap:140ms settle:140ms" hx-target="closest form">
 <input type="number" step="0.1" name="weight_lb" placeholder="lb">
 <input type="text" name="note" placeholder="note (optional)">
 <button type="submit">Log</button></form>"""
@@ -102,9 +102,9 @@ def _triage_row(t) -> str:
         meta.append(t.due.strftime("%b %-d"))
     return f"""<li id="triage-{t.id}"><span class="tt">{esc(t.text)}</span>
 <span class="tm">{esc(" · ".join(meta))}</span>
-<button class="keep" hx-post="/plan/triage/{t.id}?action=keep" hx-target="#triage-{t.id}" hx-swap="outerHTML">Keep</button>
-<button hx-post="/plan/triage/{t.id}?action=push" hx-target="#triage-{t.id}" hx-swap="outerHTML">+1wk</button>
-<button class="drop" hx-post="/plan/triage/{t.id}?action=drop" hx-target="#triage-{t.id}" hx-swap="outerHTML">Drop</button>
+<button class="keep" hx-post="/plan/triage/{t.id}?action=keep" hx-target="#triage-{t.id}" hx-swap="outerHTML swap:140ms settle:140ms">Keep</button>
+<button hx-post="/plan/triage/{t.id}?action=push" hx-target="#triage-{t.id}" hx-swap="outerHTML swap:140ms settle:140ms">+1wk</button>
+<button class="drop" hx-post="/plan/triage/{t.id}?action=drop" hx-target="#triage-{t.id}" hx-swap="outerHTML swap:140ms settle:140ms" hx-confirm="Drop this task?">Drop</button>
 </li>"""
 
 
@@ -134,7 +134,7 @@ def _qtask_row(t, current_key: str) -> str:
     return f"""<div class="qtask"><span class="qtext">{esc(t.text)}</span>
 <select class="qsel" name="to" aria-label="Move &quot;{esc(t.text)}&quot; to quadrant"
  hx-post="/plan/quadrant/{t.id}" hx-trigger="change"
- hx-target="#quadrant-matrix" hx-swap="outerHTML">{"".join(opts)}</select></div>"""
+ hx-target="#quadrant-matrix" hx-swap="outerHTML swap:140ms settle:140ms">{"".join(opts)}</select></div>"""
 
 
 def _qcell(key: str, tasks: list) -> str:
@@ -164,7 +164,7 @@ def _commit(weekly_focus) -> str:
     chips = "".join(f"<span>{esc(p)}</span>" for p in weekly_focus)
     return f"""
 <div class="chips">{chips}</div>
-<form class="commit" hx-post="/plan/commit" hx-target="#commit-section" hx-swap="innerHTML">
+<form class="commit" hx-post="/plan/commit" hx-target="#commit-section" hx-swap="innerHTML swap:140ms settle:140ms">
 <input type="text" name="p1" placeholder="Priority 1" value="{esc(weekly_focus[0]) if len(weekly_focus)>0 else ''}">
 <input type="text" name="p2" placeholder="Priority 2 (optional)" value="{esc(weekly_focus[1]) if len(weekly_focus)>1 else ''}">
 <input type="text" name="p3" placeholder="Priority 3 (optional)" value="{esc(weekly_focus[2]) if len(weekly_focus)>2 else ''}">

@@ -44,3 +44,5 @@ services:
         sync: false
       - key: BACKUP_TOKEN
         generateValue: true
+      - key: PUSH_TOKEN
+        generateValue: true

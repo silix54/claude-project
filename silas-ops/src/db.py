@@ -392,6 +392,11 @@ def archive_habit(habit_id: int):
         c.execute("UPDATE habits SET archived_at=date('now') WHERE id=?", (habit_id,))
 
 
+def unarchive_habit(habit_id: int):
+    with conn() as c:
+        c.execute("UPDATE habits SET archived_at=NULL WHERE id=?", (habit_id,))
+
+
 def list_habits(include_archived=False):
     q = "SELECT * FROM habits" + ("" if include_archived else " WHERE archived_at IS NULL")
     with conn() as c:
@@ -464,6 +469,11 @@ def edit_prompt(prompt_id: int, text: str):
 def archive_prompt(prompt_id: int):
     with conn() as c:
         c.execute("UPDATE journal_prompts SET archived_at=date('now') WHERE id=?", (prompt_id,))
+
+
+def unarchive_prompt(prompt_id: int):
+    with conn() as c:
+        c.execute("UPDATE journal_prompts SET archived_at=NULL WHERE id=?", (prompt_id,))
 
 
 def save_journal_response(prompt_id: int, response: str, d: date | None = None):
@@ -559,6 +569,11 @@ def edit_deadline(deadline_id: int, **fields):
 def archive_deadline(deadline_id: int):
     with conn() as c:
         c.execute("UPDATE deadlines SET archived_at=date('now') WHERE id=?", (deadline_id,))
+
+
+def unarchive_deadline(deadline_id: int):
+    with conn() as c:
+        c.execute("UPDATE deadlines SET archived_at=NULL WHERE id=?", (deadline_id,))
 
 
 def list_deadlines(include_archived=False):

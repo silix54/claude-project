@@ -48,7 +48,7 @@ def ring_col(h: dict, done: bool, streak: int) -> str:
     fill = f'<circle cx="22" cy="22" r="17" fill="{color}" opacity="0.22"/>' if done else ""
     return f"""<div class="hring-col">
 <button class="hring" hx-post="/reflect/habit/{h['id']}/toggle" hx-target="closest .hring-col"
- hx-swap="outerHTML" aria-label="Toggle {esc(h['name'])}, logged {'done' if done else 'not done'} today">
+ hx-swap="outerHTML swap:140ms settle:140ms" aria-label="Toggle {esc(h['name'])}, logged {'done' if done else 'not done'} today">
 <svg viewBox="0 0 44 44" width="44" height="44" aria-hidden="true">
 {fill}<circle cx="22" cy="22" r="17" fill="none" stroke="{color}" stroke-width="2.5"
  opacity="{1 if done else 0.4}"/>
@@ -291,7 +291,7 @@ def devotions_block(done_today: bool, streak: int) -> str:
     if done_today:
         body = f'<p class="sub ok">Logged today · {streak}d streak</p>'
     else:
-        body = f"""<form hx-post="/reflect/devotions" hx-target="closest .devo" hx-swap="outerHTML">
+        body = f"""<form hx-post="/reflect/devotions" hx-target="closest .devo" hx-swap="outerHTML swap:140ms settle:140ms">
 <div class="moodform">
 <label>Passage<input type="text" name="passage" placeholder="e.g. John 3"></label>
 <label>Note<input type="text" name="note"></label>
@@ -314,7 +314,7 @@ def mood_form(today_logged: bool) -> str:
 def journal_form(prompts: list[dict]) -> str:
     fields = "".join(f"""<div class="p"><label>{esc(p['text'])}</label>
 <textarea name="p{p['id']}"></textarea></div>""" for p in prompts)
-    return f"""<form class="jform" hx-post="/reflect/journal" hx-target="this" hx-swap="outerHTML">
+    return f"""<form class="jform" hx-post="/reflect/journal" hx-target="this" hx-swap="outerHTML swap:140ms settle:140ms">
 {fields}<button type="submit">Save entry</button></form>"""
 
 

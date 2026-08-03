@@ -1,0 +1,38 @@
+name: Push reminder check
+
+# Reminders (devotions/tasks/deadlines) are daily-grain but hour-gated —
+# see src/push.py's check_and_send(). Render's free plan sleeps the app
+# after ~15 min idle, so an in-process scheduler can't be trusted to fire
+# inside those windows. This hits the deployed app's /internal/push-check
+# route hourly instead, which both wakes it and runs the checks (each
+# reminder kind is itself gated to at most once per calendar day, so an
+# hourly cadence never double-sends).
+#
+# One-time setup: add two repo secrets (Settings -> Secrets and
+# variables -> Actions) if not already present from the backup workflow:
+#   RENDER_APP_URL   e.g. https://silas-ops.onrender.com
+#   PUSH_TOKEN       same value as the PUSH_TOKEN env var on Render
+
+on:
+  schedule:
+    - cron: "0 * * * *"  # hourly
+  workflow_dispatch: {}    # manual trigger, for verifying the first run
+
+jobs:
+  push-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger push check
+        run: |
+          status=$(curl -sS -o response.json -w "%{http_code}" \
+            -X POST "${RENDER_APP_URL}/internal/push-check" \
+            -H "Authorization: Bearer ${PUSH_TOKEN}")
+          echo "response body:"
+          cat response.json
+          if [ "$status" != "200" ]; then
+            echo "push check failed with HTTP $status"
+            exit 1
+          fi
+        env:
+          RENDER_APP_URL: ${{ secrets.RENDER_APP_URL }}
+          PUSH_TOKEN: ${{ secrets.PUSH_TOKEN }}
