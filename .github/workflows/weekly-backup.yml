@@ -1,0 +1,36 @@
+name: Weekly Turso backup
+
+# Render's free plan sleeps the app after ~15 min idle, so an in-process
+# scheduler can't be trusted to fire on its own. This hits the deployed
+# app's /internal/backup route instead, which both wakes it and runs the
+# backup (dump Turso -> local .db -> the journal Drive folder, rotating
+# the last several copies) in one request.
+#
+# One-time setup: add two repo secrets (Settings -> Secrets and
+# variables -> Actions):
+#   RENDER_APP_URL   e.g. https://silas-ops.onrender.com
+#   BACKUP_TOKEN     same value as the BACKUP_TOKEN env var on Render
+
+on:
+  schedule:
+    - cron: "0 10 * * 0"  # Sundays, 10:00 UTC
+  workflow_dispatch: {}    # manual trigger, for verifying the first run
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger backup
+        run: |
+          status=$(curl -sS -o response.json -w "%{http_code}" \
+            -X POST "${RENDER_APP_URL}/internal/backup" \
+            -H "Authorization: Bearer ${BACKUP_TOKEN}")
+          echo "response body:"
+          cat response.json
+          if [ "$status" != "200" ]; then
+            echo "backup failed with HTTP $status"
+            exit 1
+          fi
+        env:
+          RENDER_APP_URL: ${{ secrets.RENDER_APP_URL }}
+          BACKUP_TOKEN: ${{ secrets.BACKUP_TOKEN }}

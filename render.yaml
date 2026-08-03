@@ -1,0 +1,46 @@
+# Render free-tier web service. Deploy: connect this repo in the Render
+# dashboard, it picks up this file automatically ("New +" -> "Blueprint").
+# Lives at the repo root (not silas-ops/) because Render only auto-detects
+# render.yaml there; rootDir below points build/start commands at the
+# silas-ops/ subfolder where the actual app and requirements.txt live —
+# this is a personal function suite repo with room for more than one app.
+#
+# Cold start of 30-60s after 15 minutes idle is an accepted tradeoff for a
+# 1-2x/day personal dashboard (see silas-ops/BUILD_PROMPT.md's architecture
+# notes) — not something to fix here. A Raspberry Pi + Tailscale setup is
+# the natural upgrade later if that becomes annoying.
+#
+# ops.db persists via Turso (hosted libSQL, a SQLite fork) instead of a
+# Render disk — see src/db.py's conn(). That keeps this on the free plan:
+# Render disks require a paid plan, Turso's free tier doesn't. Set
+# TURSO_DATABASE_URL + TURSO_AUTH_TOKEN below once you've created a
+# database (turso.tech); without them db.py falls back to a local sqlite
+# file under DATA_DIR, which *is* on Render's default ephemeral disk and
+# gets wiped on redeploy — the whole point of setting these two.
+#
+# journal/ stays on that same ephemeral local disk regardless — it isn't
+# moved to Turso. It doesn't need to be: journal.save_entry() already
+# mirrors every entry to Google Drive (drive.file scope) right after
+# writing it locally, so Drive is the real persistent copy and the local
+# file is disposable working storage. See silas-ops/README.md for setup.
+services:
+  - type: web
+    name: silas-ops
+    runtime: python
+    rootDir: silas-ops
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
+    envVars:
+      - key: APP_PASSWORD
+        sync: false
+      - key: FLASK_SECRET_KEY
+        generateValue: true
+      - key: PYTHON_VERSION
+        value: 3.11.15
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false
+      - key: BACKUP_TOKEN
+        generateValue: true

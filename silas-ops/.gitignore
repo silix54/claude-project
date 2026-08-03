@@ -1,0 +1,11 @@
+secrets/
+data/ops.db
+data/.calendar_cache.json
+data/.tasks_cache.json
+data/.strava_cache.json
+data/.drive_folder_id.json
+journal/
+out/
+.venv/
+__pycache__/
+*.pyc

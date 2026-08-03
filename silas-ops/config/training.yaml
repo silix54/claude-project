@@ -1,0 +1,66 @@
+# Periodization. Three weeks on, one week deload, anchored to the term start.
+# Change `anchor` and every deload week downstream recomputes. Do not hardcode
+# deload dates anywhere else.
+
+periodization:
+  anchor: 2026-09-07      # Monday that block 1, week 1 begins
+  build_weeks: 3
+  deload_weeks: 1
+  phase: "base"           # base | build | peak | taper | offseason
+
+races:
+  - name: "Olympic distance triathlon"
+    date: 2026-09-05
+    priority: B
+  - name: "Canada Army Run 10K"
+    date: 2026-09-20
+    priority: C
+  - name: "Half Ironman 70.3"
+    date: 2027-07-01       # placeholder, set once registered
+    venue: "Muskoka or Mont-Tremblant"
+    priority: A
+
+# Weekly template. The dashboard shows today's planned session and flags when
+# the log has drifted from the template for more than `drift_tolerance` days.
+drift_tolerance_days: 4
+
+week:
+  Mon:
+    - {type: rest, note: "Full rest"}
+  Tue:
+    - {type: strength, name: "Push"}
+    - {type: swim, name: "Swim intervals", venue: "Carleton"}
+  Wed:
+    - {type: strength, name: "Pull"}
+    - {type: bike, name: "Bike intervals", zone: 4}
+  Thu:
+    - {type: rest, note: "Full rest. Drill night."}
+  Fri:
+    - {type: strength, name: "Legs", note: "Triathlon performance, not aesthetics"}
+    - {type: run, name: "Run intervals", zone: 4}
+  Sat:
+    - {type: bike, name: "Long bike", zone: 2}
+    - {type: swim, name: "Long swim", venue: "Nepean Sportsplex"}
+  Sun:
+    - {type: strength, name: "Upper"}
+    - {type: run, name: "Long run", zone: 2}
+
+# Deload week modification: what changes when the week is a deload week.
+deload_rules:
+  volume_multiplier: 0.6
+  drop_intervals: true
+  note: "Zone 2 only. Keep frequency, cut duration. Lift at reduced load."
+
+nutrition:
+  goal: surplus            # surplus | maintenance | cut
+  maintenance_kcal: [3000, 3200]
+  target_kcal: [3400, 3500]
+  protein_g: [140, 150]
+  fat_g: [90, 100]
+  carb_g: [480, 520]
+  bodyweight_lb_target: 152     # set your next checkpoint
+  weigh_in_day: Sun
+
+# Overtraining guards moved to /settings (SQLite-backed) — see db.guards().
+# Defaults there match what used to be hardcoded here: max_consecutive_
+# training_days=5, min_sleep_hours=7, flag_if_sessions_per_week_over=11.

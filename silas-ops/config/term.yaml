@@ -1,0 +1,61 @@
+# Academic term definition. Edit this file when the term changes.
+# Everything downstream computes from these dates. Nothing is hardcoded.
+
+term:
+  name: "Fall 2026"
+  starts: 2026-09-07
+  ends: 2026-12-08
+  exams_start: 2026-12-10
+  exams_end: 2026-12-21
+  reading_week: [2026-10-19, 2026-10-25]
+
+# The course list itself — codes only, once a term. Deadlines under each
+# course are added from /settings (SQLite-backed) as syllabi land, not here.
+courses:
+  - code: BUSI 4301
+    name: ""
+  - code: BUSI 3309
+    name: ""
+  - code: BUSI 3405
+    name: ""
+  - code: BUSI 3434
+    name: ""
+  - code: BUSI 4400
+    name: ""
+  - code: PSCI 2601
+    name: ""
+
+# Fixed weekly commitments that are NOT in Google Calendar, or that you want
+# the dashboard to know about independently of whether the calendar is reachable.
+anchors:
+  - name: "AAFC remote"
+    day: Tue
+    start: "09:00"
+    end: "10:30"
+  - name: "AAFC on site"
+    day: Thu
+    start: "09:00"
+    end: "17:00"
+  - name: "AAFC remote"
+    day: Fri
+    start: "13:30"
+    end: "17:00"
+  - name: "Reserve drill"
+    day: Thu
+    start: "19:00"
+    end: "22:00"
+    protected: true
+  - name: "Sunday calibration"
+    day: Sun
+    start: "19:00"
+    end: "20:00"
+    protected: true
+
+# Weekends away. Reserve weekends double as training deload weekends.
+reserve_weekends: []
+  # - [2026-09-19, 2026-09-20]
+
+# Priority order moved to /settings (SQLite-backed, phone-editable) — see
+# db.priority_order(). Not here, since this file is meant for the once-a-
+# term edits, and priority order is exactly the kind of thing that shifts
+# more often than that.

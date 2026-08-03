@@ -1,0 +1,9 @@
+{
+  "name": "Silas Ops",
+  "short_name": "Ops",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#E8E6E1",
+  "theme_color": "#16181D",
+  "icons": []
+}
