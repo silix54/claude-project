@@ -3,8 +3,11 @@
 Locally: one file, <DATA_DIR>/ops.db, via Python's built-in sqlite3 — no
 server process, nothing to configure. Deployed: Turso (hosted libSQL, a
 SQLite fork) when TURSO_DATABASE_URL is set, so the database survives
-Render redeploys without needing a paid persistent disk. Every function
-below reads the same either way — see conn() for how that split works.
+Render redeploys without needing a paid persistent disk. Talks to Turso
+over its plain HTTP API (see _turso_pipeline()) rather than a client
+library, deliberately — see that function's docstring for why. Every
+function below reads the same either way — see conn() for how that
+split works.
 
 Why a database exists at all instead of extending the YAML files: YAML is
 great for "I open a text editor twice a term and change three lines."
@@ -22,7 +25,7 @@ from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
-import libsql
+import requests
 
 from .chrome import HABIT_COLOR_NAMES
 
@@ -151,48 +154,36 @@ DEFAULT_ROTATING_PROMPTS = [
 
 
 class _RemoteRow:
-    """Makes a plain libsql result tuple behave like sqlite3.Row for the
-    rest of this file: dict(row) and row["col"] both need to keep working
-    so none of the call sites below have to change between backends.
-    libsql (DB-API 2.0 style) returns bare tuples with no column-name
-    access at all, so column names have to be carried alongside each row
-    from the cursor's .description instead."""
-    __slots__ = ("_names", "_row")
+    """Makes one decoded Turso row behave like sqlite3.Row for the rest of
+    this file: dict(row) and row["col"] / row[0] both need to keep
+    working so none of the call sites below have to change between
+    backends."""
+    __slots__ = ("_names", "_values")
 
-    def __init__(self, names, row):
+    def __init__(self, names, values):
         self._names = names
-        self._row = row
+        self._values = values
 
     def keys(self):
         return self._names
 
     def __getitem__(self, key):
         if isinstance(key, str):
-            return self._row[self._names.index(key)]
-        return self._row[key]
+            return self._values[self._names.index(key)]
+        return self._values[key]
 
 
 class _RemoteCursor:
-    """Makes one libsql Cursor behave like a sqlite3 cursor: iterable,
-    .fetchone(), .lastrowid — the only things this file actually uses.
-    Unlike sqlite3.Cursor, libsql's Cursor isn't directly iterable and
-    its rows carry no column names, hence the eager fetchall()+wrap
-    here rather than lazy iteration."""
+    """Makes one Turso HTTP result behave like a sqlite3 cursor: iterable,
+    .fetchone(), .lastrowid — the only things this file actually uses."""
     __slots__ = ("_rows", "lastrowid")
 
-    def __init__(self, cursor):
-        self.lastrowid = cursor.lastrowid
-        cols = cursor.description
-        if cols:
-            names = [c[0] for c in cols]
-            # fetchall() returns None (not []) for statements with no
-            # result set at all (ALTER/INSERT/UPDATE/DELETE), even though
-            # .description is also None for those — this branch only
-            # exists for actual SELECTs, so cols being truthy is enough.
-            rows = cursor.fetchall() or []
-        else:
-            rows = []
-        self._rows = [_RemoteRow(names, row) for row in rows]
+    def __init__(self, result: dict):
+        names = [c["name"] for c in result.get("cols", [])]
+        self._rows = [_RemoteRow(names, [_decode_cell(c) for c in row])
+                      for row in result.get("rows", [])]
+        lrid = result.get("last_insert_rowid")
+        self.lastrowid = int(lrid) if lrid is not None else None
 
     def __iter__(self):
         return iter(self._rows)
@@ -201,62 +192,132 @@ class _RemoteCursor:
         return self._rows[0] if self._rows else None
 
 
+def _encode_param(v):
+    """Python value -> Hrana's typed-value JSON shape. Integers must be
+    sent as strings (Hrana's protocol, to survive 64-bit values through
+    JSON) — confirmed by testing: the same request with a bare JSON
+    number for an "integer"-typed arg is rejected with 400."""
+    if v is None:
+        return {"type": "null"}
+    if isinstance(v, bool):
+        return {"type": "integer", "value": str(int(v))}
+    if isinstance(v, int):
+        return {"type": "integer", "value": str(v)}
+    if isinstance(v, float):
+        return {"type": "float", "value": v}
+    return {"type": "text", "value": str(v)}
+
+
+def _decode_cell(cell: dict):
+    t = cell["type"]
+    if t == "null":
+        return None
+    if t == "integer":
+        return int(cell["value"])
+    if t in ("text", "float"):
+        return cell["value"]
+    if t == "blob":
+        import base64
+        return base64.b64decode(cell["value"])
+    return cell.get("value")
+
+
+def _turso_pipeline(stmts: list[dict]) -> list[dict]:
+    """POST a batch of statements to Turso's Hrana-over-HTTP endpoint
+    (sqld's `/v2/pipeline`) and return each one's decoded "result" dict.
+
+    Why plain synchronous HTTP instead of a client library: both libSQL
+    client libraries tried before this (libsql_client, then libsql) pull
+    in a background async runtime (aiohttp's event loop, then a Rust
+    tokio runtime) that spawns its own OS threads under the hood. On
+    Render's free-tier container, the tokio-based `libsql` package
+    crash-looped the whole gunicorn worker — "thread 'tokio-runtime-
+    worker' panicked ... failed to join thread: Resource deadlock
+    avoided" on every fresh worker boot, confirmed NOT reproducible
+    against the same live database from an unconstrained environment, so
+    it's specific to that container's thread/resource limits, not Turso
+    or this database. A plain `requests.post()` has no persistent
+    connection, no background thread, and nothing that can be left in a
+    broken state across requests — each call is fully self-contained.
+
+    This also means writes need no separate .commit(): Hrana's HTTP API
+    has no notion of a session/transaction outliving one HTTP call (no
+    baton is sent to chain requests together), so whatever happens in
+    one POST is already durable by the time the response comes back —
+    verified by writing in one call and reading it back in a separate,
+    fresh HTTP call immediately after.
+    """
+    host = TURSO_URL.split("://", 1)[-1]
+    body = {"requests": stmts + [{"type": "close"}]}
+    headers = {"Authorization": f"Bearer {TURSO_TOKEN}"}
+    url = f"https://{host}/v2/pipeline"
+
+    # A dropped/reset connection is a transient network blip, not a
+    # reason to fail a page load — one quick retry covers it without
+    # masking a real, persistent problem (which the second attempt would
+    # also raise on).
+    for attempt in (1, 2):
+        try:
+            r = requests.post(url, headers=headers, json=body, timeout=15)
+            break
+        except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if attempt == 2:
+                raise
+    r.raise_for_status()
+    results = r.json()["results"]
+    out = []
+    for item in results[:-1]:  # drop the trailing "close" ack
+        if item["type"] == "error":
+            raise RuntimeError(f"Turso error: {item['error']['message']}")
+        out.append(item["response"]["result"])
+    return out
+
+
 class _RemoteConn:
-    """Turso/libSQL, standing in for the sqlite3.Connection the rest of
-    this file was written against. Unlike the old libsql_client backend,
-    this library does NOT auto-commit each statement to the remote
-    server — writes only become visible to other connections (i.e.
-    actually land in Turso) after an explicit .commit(), confirmed by
-    testing a write from one connection against a second, freshly-opened
-    connection. So every write here commits immediately after, which
-    keeps the same "every function is one logical write" behavior the
-    rest of this file already assumes (no function here spans a
-    multi-statement transaction that needs atomicity).
+    """Turso, standing in for the sqlite3.Connection the rest of this
+    file was written against. Every call here is its own HTTP round
+    trip — see _turso_pipeline() for why, and why that also means no
+    explicit .commit() is needed.
 
     Foreign-key enforcement (PRAGMA foreign_keys=ON) isn't reapplied here
-    the way the local path does it: over a remote connection, a pragma
-    set on one statement has no guaranteed connection to carry over to
-    the next. Every write in this file already only inserts valid
-    references, so this is an accepted data-integrity nicety this path
-    doesn't get, not a correctness gap in how the app actually writes.
+    the way the local path does it: over a stateless HTTP connection, a
+    pragma set on one call has no way to carry over to the next. Every
+    write in this file already only inserts valid references, so this is
+    an accepted data-integrity nicety this path doesn't get, not a
+    correctness gap in how the app actually writes.
     """
-    __slots__ = ("_conn",)
-
-    def __init__(self, connection):
-        self._conn = connection
+    __slots__ = ()
 
     def execute(self, sql, params=()):
-        cur = self._conn.execute(sql, list(params) if params else None)
-        self._conn.commit()
-        return _RemoteCursor(cur)
+        stmt = {"sql": sql}
+        if params:
+            stmt["args"] = [_encode_param(p) for p in params]
+        result = _turso_pipeline([{"type": "execute", "stmt": stmt}])[0]
+        return _RemoteCursor(result)
 
     def executescript(self, sql):
-        # libsql's executescript() handles comments and semicolons inside
-        # them natively (verified against SCHEMA's own comment prose,
-        # which contains a literal semicolon) — no custom splitter needed
-        # here, unlike the old libsql_client-based batch() approach.
-        self._conn.executescript(sql)
-        self._conn.commit()
+        # Hrana's "execute" op takes exactly one statement, unlike
+        # sqlite3's executescript() — split on `;` first. Comments have
+        # to be stripped *before* splitting: SCHEMA's own comment prose
+        # contains a literal semicolon ("...from Strava; this table
+        # is..."), so splitting first would cut that comment in half and
+        # leave its back half as a bare SQL fragment prepended to the
+        # next real statement.
+        stmts = _split_sql_script(sql)
+        if stmts:
+            _turso_pipeline([{"type": "execute", "stmt": {"sql": s}} for s in stmts])
 
 
-_remote_conn = None
-
-
-def _get_remote_conn():
-    global _remote_conn
-    if _remote_conn is None:
-        # One connection for the process lifetime, not one per request.
-        # Safe under the single sync gunicorn worker this app runs with
-        # (render.yaml: --workers 1, no --threads), so there's never a
-        # second thread reusing this connection concurrently.
-        _remote_conn = libsql.connect(TURSO_URL, auth_token=TURSO_TOKEN)
-    return _remote_conn
+def _split_sql_script(script: str) -> list[str]:
+    no_comments = "\n".join(
+        ln for ln in script.splitlines() if not ln.strip().startswith("--"))
+    return [s.strip() for s in no_comments.split(";") if s.strip()]
 
 
 @contextmanager
 def conn():
     if TURSO_URL:
-        yield _RemoteConn(_get_remote_conn())
+        yield _RemoteConn()
         return
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(DB_PATH)

@@ -18,7 +18,15 @@ FOLDER_ID_CACHE = Path("data/.drive_folder_id.json")
 
 def _service():
     from googleapiclient.discovery import build
-    return build("drive", "v3", credentials=google_auth.credentials(), cache_discovery=False)
+    import httplib2
+    from google_auth_httplib2 import AuthorizedHttp
+
+    # googleapiclient's own http builder, used when you just pass
+    # credentials=, sets no socket timeout at all — a stalled connection
+    # to Google would hang forever instead of failing. Build the http
+    # object by hand so there's an actual timeout on it.
+    http = AuthorizedHttp(google_auth.credentials(), http=httplib2.Http(timeout=20))
+    return build("drive", "v3", http=http, cache_discovery=False)
 
 
 def _folder_id(svc) -> str:

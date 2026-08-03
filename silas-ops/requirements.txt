@@ -22,7 +22,6 @@ idna==3.18
 imagesize==2.0.0
 itsdangerous==2.2.0
 Jinja2==3.1.6
-libsql==0.1.11
 MarkupSafe==3.0.3
 oauthlib==3.3.1
 packaging==26.2
