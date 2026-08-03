@@ -10,27 +10,27 @@
 # notes) — not something to fix here. A Raspberry Pi + Tailscale setup is
 # the natural upgrade later if that becomes annoying.
 #
-# data/ops.db and journal/ (under DATA_DIR below) live on the disk block —
-# a real Render persistent disk, not the service's default ephemeral one,
-# so they survive redeploys. Render disks require a paid plan (free-tier
-# services can't attach one), which is why `plan` is `starter` here, not
-# `free` — check current Starter pricing before deploying; this changes
-# the cost of running this from $0/mo. Deploy caveat that comes with any
-# disk: no zero-downtime deploys (Render can't run two instances against
-# one disk at once), so each deploy has a brief gap, not just a cold
-# start — a non-issue for a 1-2x/day personal dashboard.
+# ops.db persists via Turso (hosted libSQL, a SQLite fork) instead of a
+# Render disk — see src/db.py's conn(). That keeps this on the free plan:
+# Render disks require a paid plan, Turso's free tier doesn't. Set
+# TURSO_DATABASE_URL + TURSO_AUTH_TOKEN below once you've created a
+# database (turso.tech); without them db.py falls back to a local sqlite
+# file under DATA_DIR, which *is* on Render's default ephemeral disk and
+# gets wiped on redeploy — the whole point of setting these two.
+#
+# journal/ stays on that same ephemeral local disk regardless — it isn't
+# moved to Turso. It doesn't need to be: journal.save_entry() already
+# mirrors every entry to Google Drive (drive.file scope) right after
+# writing it locally, so Drive is the real persistent copy and the local
+# file is disposable working storage. See silas-ops/README.md for setup.
 services:
   - type: web
     name: silas-ops
     runtime: python
     rootDir: silas-ops
-    plan: starter
+    plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --timeout 120
-    disk:
-      name: silas-ops-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: APP_PASSWORD
         sync: false
@@ -38,5 +38,7 @@ services:
         generateValue: true
       - key: PYTHON_VERSION
         value: 3.11.15
-      - key: DATA_DIR
-        value: /var/data
+      - key: TURSO_DATABASE_URL
+        sync: false
+      - key: TURSO_AUTH_TOKEN
+        sync: false

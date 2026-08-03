@@ -22,7 +22,10 @@ design spec and philosophy.
 - `src/google_auth.py` — the one shared OAuth flow for Calendar + Tasks +
   Drive (one consent screen, one token).
 - `src/db.py` — SQLite layer: habits, mood/energy, journal, devotions,
-  deadlines, strength/weight logs, settings, push subscriptions.
+  deadlines, strength/weight logs, settings, push subscriptions. Local
+  file by default; talks to Turso (hosted libSQL) instead when
+  `TURSO_DATABASE_URL` is set, so the data survives Render redeploys
+  without needing a paid persistent disk — see `conn()`.
 - `src/assemble.py` / `src/render.py` — daily view state + HTML.
 - `src/assemble_plan.py` / `src/render_plan.py` — `/plan` (Sunday session).
 - `src/assemble_reflect.py` / `src/render_reflect.py` — `/reflect`.
@@ -84,7 +87,32 @@ Generates `secrets/vapid.json` + `secrets/vapid_private.pem`. The daily
 view registers the service worker and subscribes automatically once these
 exist.
 
-### 5. Environment variables
+### 5. Turso (optional locally, needed for persistence on Render)
+
+Without this, `ops.db` is a local SQLite file that works fine for
+development but gets wiped on every Render redeploy (Render's default
+disk is ephemeral). Turso is a free hosted libSQL (SQLite-fork) database
+that fixes that without needing a paid Render disk:
+
+1. turso.tech → sign up → create a database.
+2. Get its URL: `turso db show <db-name> --url` (or the dashboard) — looks
+   like `libsql://<db-name>-<org>.turso.io`.
+3. Get an auth token: `turso db tokens create <db-name>` (or the
+   dashboard).
+4. Set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` — locally in your shell
+   if you want to develop against the real remote database, or just on
+   Render (Settings → Environment, both marked `sync: false` in
+   `render.yaml` so neither is ever in the repo). Leave both unset locally
+   and `db.py` falls back to the local SQLite file, no Turso account
+   needed for local dev.
+
+`journal/` is **not** moved to Turso and stays on whatever local/ephemeral
+disk the process has — that's intentional. `journal.save_entry()` already
+mirrors every entry to Google Drive right after writing it locally (see
+step 2's Drive scope), so Drive is the actual persistent copy; the local
+file is disposable working storage that's fine to lose on redeploy.
+
+### 6. Environment variables
 
 - `APP_PASSWORD` — required. The single shared password.
 - `FLASK_SECRET_KEY` — recommended in production (Render's `render.yaml`
@@ -92,54 +120,34 @@ exist.
   which just means everyone's logged out on every restart — not a security
   hole, just an annoyance.
 - `PORT` — set by Render automatically.
-- `DATA_DIR` — where `ops.db` and `journal/` live. Defaults to `data`
-  (this repo's original local-dev path) when unset. `render.yaml` sets it
-  to `/var/data`, the persistent disk's mount path — see the deploy
-  section below.
+- `DATA_DIR` — where the local-fallback `ops.db` and `journal/` live.
+  Defaults to `data` (this repo's original local-dev path) when unset.
+- `TURSO_DATABASE_URL` / `TURSO_AUTH_TOKEN` — see step 5. Unset means
+  `ops.db` is a local file under `DATA_DIR` instead.
 
-### 6. Run locally
+### 7. Run locally
 
     python -m src.cli check     # sanity check config + secrets, no network
     python app.py                # dev server on :5000
     # or:
     python -m src.cli today      # render a static copy to out/dashboard.html
 
-### 7. Deploy (Render, paid Starter plan — see disk note below)
+### 8. Deploy (Render free tier)
 
 Push this repo to GitHub, connect it in the Render dashboard ("New +" →
 "Blueprint" — it picks up `render.yaml` from the **repo root**, which sets
 `rootDir: silas-ops` so the build/start commands run against this
-subfolder), set `APP_PASSWORD` in the Render env var UI (marked
-`sync: false` so it's never in the repo).
-
-**Persistent disk, one-time step depends on how the service was created:**
-
-`data/ops.db` and `journal/` (both under `DATA_DIR`) now live on a real
-Render persistent disk, declared in `render.yaml`'s `disk:` block
-(`mountPath: /var/data`, `1GB`) — they survive redeploys instead of being
-wiped every time. Render disks require a **paid plan**; `render.yaml`
-sets `plan: starter` accordingly (check current Starter pricing before
-deploying — this is no longer a $0/mo deploy). Attaching a disk also means
-no more zero-downtime deploys (Render can't run two instances against one
-disk at once), which is a non-issue for a 1-2x/day personal dashboard.
-
-- **If the service was created via "New +" → Blueprint** (reads
-  `render.yaml` directly): the disk, `plan: starter`, and the `DATA_DIR`
-  env var all provision automatically on the next Blueprint sync. Nothing
-  to do by hand.
-- **If the service was created manually** (clicked "New Web Service" and
-  pointed it at this repo, rather than "New +" → Blueprint): `render.yaml`
-  is ignored for an existing manually-created service, so add the disk
-  yourself — service → **Settings → Disks → Add Disk**, name
-  `silas-ops-data`, mount path `/var/data`, size `1GB` — and add
-  `DATA_DIR=/var/data` under **Settings → Environment**. Also confirm the
-  service's plan is Starter or above; free-tier services can't attach a
-  disk at all.
+subfolder), set `APP_PASSWORD`, `TURSO_DATABASE_URL`, and
+`TURSO_AUTH_TOKEN` in the Render env var UI (all marked `sync: false` so
+none are ever in the repo). Without the two Turso vars set, the app still
+deploys and runs fine — `ops.db` just reverts to a local file that gets
+wiped on the next redeploy, same as if you'd never read this section.
 
 Long-term, the build spec's other flagged option is moving to a Raspberry
-Pi + Tailscale setup instead of a paid Render disk — that also removes the
-cold start, and keeps API tokens off a third party's server. Not done
-here; noted as the natural next step if the monthly cost isn't worth it.
+Pi + Tailscale setup instead of any of this — that also removes the cold
+start, and keeps API tokens off both Render's and Turso's servers. Not
+done here; noted as the natural next step if that ever matters more than
+the convenience of a cloud deploy.
 
 ## What's editable from the phone vs. baked into code vs. a config file
 

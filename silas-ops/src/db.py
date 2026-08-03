@@ -1,20 +1,17 @@
 """Everything editable from the phone lives here, not in a YAML file.
 
-One file, <DATA_DIR>/ops.db. No server process, no extra dependency beyond
-Python's built-in sqlite3. Safe for a single user hitting it from one
-device at a time, which is the only case that matters here.
+Locally: one file, <DATA_DIR>/ops.db, via Python's built-in sqlite3 — no
+server process, nothing to configure. Deployed: Turso (hosted libSQL, a
+SQLite fork) when TURSO_DATABASE_URL is set, so the database survives
+Render redeploys without needing a paid persistent disk. Every function
+below reads the same either way — see conn() for how that split works.
 
-Why this exists instead of extending the YAML files: YAML is great for
-"I open a text editor twice a term and change three lines." It's a bad
-fit for "I add a new habit from my phone on a Tuesday." A database with
-a settings page can be written to from a web form. A YAML file on a
-server can't be edited by you without SSHing in, which defeats the
-entire point of making this modular.
-
-DATA_DIR defaults to "data" (this repo's original path, still what local
-dev uses) but on Render points at the mounted persistent disk — see
-render.yaml's `disk` block. Without that env var, ops.db would sit on
-Render's default ephemeral filesystem and get wiped on every redeploy.
+Why a database exists at all instead of extending the YAML files: YAML is
+great for "I open a text editor twice a term and change three lines."
+It's a bad fit for "I add a new habit from my phone on a Tuesday." A
+database with a settings page can be written to from a web form. A YAML
+file on a server can't be edited by you without SSHing in, which defeats
+the entire point of making this modular.
 """
 
 from __future__ import annotations
@@ -25,7 +22,11 @@ from contextlib import contextmanager
 from datetime import date
 from pathlib import Path
 
+import libsql_client
+
 DB_PATH = Path(os.environ.get("DATA_DIR", "data")) / "ops.db"
+TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
+TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 
 DEFAULT_PRIORITY_ORDER = ["school", "work", "faith", "fitness", "relationships"]
 DEFAULT_GUARDS = {"max_consecutive_training_days": 5, "min_sleep_hours": 7,
@@ -143,8 +144,104 @@ DEFAULT_ROTATING_PROMPTS = [
 ]
 
 
+class _RemoteRow:
+    """Makes a libsql_client Row behave like sqlite3.Row for the rest of
+    this file: dict(row) and row["col"] both need to keep working so none
+    of the call sites below have to change between backends. dict()
+    builds itself from any object with .keys() + __getitem__(key) — Row
+    only exposes that pair via a private-by-convention `_fields` property
+    (no public .keys()), hence this wrapper."""
+    __slots__ = ("_row",)
+
+    def __init__(self, row):
+        self._row = row
+
+    def keys(self):
+        return self._row._fields
+
+    def __getitem__(self, key):
+        return self._row[key]
+
+
+class _RemoteCursor:
+    """Makes one libsql ResultSet behave like a sqlite3 cursor: iterable,
+    .fetchone(), .lastrowid — the only things this file actually uses."""
+    __slots__ = ("_rows", "lastrowid")
+
+    def __init__(self, result_set):
+        self._rows = [_RemoteRow(r) for r in result_set.rows]
+        self.lastrowid = result_set.last_insert_rowid
+
+    def __iter__(self):
+        return iter(self._rows)
+
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
+
+def _split_sql_script(script: str) -> list[str]:
+    """executescript() takes one multi-statement string with comments;
+    libsql's batch() wants a list of individual statements. Schema-only
+    splitter: strip `-- ...` line comments *first*, while newlines are
+    still intact, then split what's left on `;`. Order matters — SCHEMA's
+    comment prose contains a literal semicolon ("...from Strava; this
+    table is..."), so splitting on `;` before removing comments cuts that
+    comment line in half and leaves its back half ("this table is...") as
+    a bare SQL fragment prepended to the next real statement."""
+    no_comments = "\n".join(
+        ln for ln in script.splitlines() if not ln.strip().startswith("--"))
+    return [s.strip() for s in no_comments.split(";") if s.strip()]
+
+
+class _RemoteConn:
+    """Turso/libSQL, standing in for the sqlite3.Connection the rest of
+    this file was written against. Each statement here auto-commits on
+    its own — there's no cross-statement transaction anywhere in this
+    file that actually needs atomicity, every function is one logical
+    write, so there's nothing for a .commit() at the end to do (unlike
+    the local sqlite3 path, which still batches its writes in one
+    transaction per `with conn()` block).
+
+    Foreign-key enforcement (PRAGMA foreign_keys=ON) isn't reapplied here
+    the way the local path does it: over a remote client, a pragma set on
+    one statement has no guaranteed connection to carry over to the next.
+    Every write in this file already only inserts valid references, so
+    this is an accepted data-integrity nicety this path doesn't get, not
+    a correctness gap in how the app actually writes.
+    """
+    __slots__ = ("_client",)
+
+    def __init__(self, client):
+        self._client = client
+
+    def execute(self, sql, params=()):
+        return _RemoteCursor(self._client.execute(sql, list(params) if params else None))
+
+    def executescript(self, sql):
+        stmts = _split_sql_script(sql)
+        if stmts:
+            self._client.batch(stmts)
+
+
+_remote_client = None
+
+
+def _get_remote_client():
+    global _remote_client
+    if _remote_client is None:
+        # One client for the process lifetime, not one per request: each
+        # client spins up its own background thread, so building one per
+        # `with conn()` block (dozens of times per page load) would mean
+        # a fresh thread per database call.
+        _remote_client = libsql_client.create_client_sync(url=TURSO_URL, auth_token=TURSO_TOKEN)
+    return _remote_client
+
+
 @contextmanager
 def conn():
+    if TURSO_URL:
+        yield _RemoteConn(_get_remote_client())
+        return
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(DB_PATH)
     c.row_factory = sqlite3.Row

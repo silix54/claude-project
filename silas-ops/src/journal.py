@@ -10,10 +10,12 @@ created). Nothing here ever reads that file back for anything but the
 save/sync path itself — see the privacy note in db.py and the build spec.
 
 DATA_DIR defaults to "data" locally (so this is data/journal/ in local
-dev — same root db.py's ops.db lives under) but on Render points at the
-mounted persistent disk, same as db.py — see render.yaml's `disk` block.
-Without it, journal entries would sit on Render's default ephemeral
-filesystem and get wiped on every redeploy.
+dev — same root db.py's local-fallback ops.db lives under). Unlike
+db.py's data (which can persist via Turso instead — see db.py), this
+local file is intentionally disposable: on Render it sits on the default
+ephemeral filesystem and gets wiped on every redeploy, and that's fine,
+because save_entry() below already mirrors every entry to Drive right
+after writing it — Drive is the real persistent copy.
 """
 
 from __future__ import annotations
