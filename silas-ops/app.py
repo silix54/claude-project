@@ -235,51 +235,66 @@ def create_app():
         term = yaml.safe_load(Path("config/term.yaml").read_text())
         state = {
             "habits": db.list_habits(),
+            "archived_habits": [h for h in db.list_habits(include_archived=True) if h["archived_at"]],
             "fixed_prompts": db.list_prompts("fixed"),
             "rotating_prompts": db.list_prompts("rotating"),
+            "archived_prompts": [p for p in db.list_prompts(include_archived=True) if p["archived_at"]],
             "deadlines": db.list_deadlines(),
+            "archived_deadlines": [d for d in db.list_deadlines(include_archived=True) if d["archived_at"]],
             "course_codes": [c["code"] for c in term.get("courses", [])],
             "priority_order": db.priority_order(),
             "guards": db.guards(),
             "wake_sleep": db.wake_sleep(),
         }
-        return render_settings(state)
+        return render_settings(state, saved=request.args.get("saved") == "1")
 
     @app.post("/settings/habits")
     @auth.login_required
     def settings_add_habit():
         db.add_habit(request.form["name"])
-        return redirect(url_for("settings_view"))
+        return redirect(url_for("settings_view", saved="1"))
 
     @app.post("/settings/habits/<int:habit_id>/rename")
     @auth.login_required
     def settings_rename_habit(habit_id):
         db.rename_habit(habit_id, request.form["name"])
-        return redirect(url_for("settings_view"))
+        return redirect(url_for("settings_view", saved="1"))
 
     @app.post("/settings/habits/<int:habit_id>/archive")
     @auth.login_required
     def settings_archive_habit(habit_id):
         db.archive_habit(habit_id)
-        return redirect(url_for("settings_view"))
+        return redirect(url_for("settings_view", saved="1"))
+
+    @app.post("/settings/habits/<int:habit_id>/unarchive")
+    @auth.login_required
+    def settings_unarchive_habit(habit_id):
+        db.unarchive_habit(habit_id)
+        return redirect(url_for("settings_view", saved="1"))
 
     @app.post("/settings/prompts")
     @auth.login_required
     def settings_add_prompt():
         db.add_prompt(request.form["kind"], request.form["text"])
-        return redirect(url_for("settings_view"))
+        return redirect(url_for("settings_view", saved="1"))
 
     @app.post("/settings/prompts/<int:prompt_id>/edit")
     @auth.login_required
     def settings_edit_prompt(prompt_id):
         db.edit_prompt(prompt_id, request.form["text"])
-        return redirect(url_for("settings_view"))
+        return redirect(url_for("settings_view", saved="1"))
 
     @app.post("/settings/prompts/<int:prompt_id>/archive")
     @auth.login_required
     def settings_archive_prompt(prompt_id):
         db.archive_prompt(prompt_id)
-        return redirect(url_for("settings_view"))
+        return redirect(url_for("settings_view", saved="1"))
+
+    @app.post("/settings/prompts/<int:prompt_id>/unarchive")
+    @auth.login_required
+    def settings_unarchive_prompt(prompt_id):
+        db.unarchive_prompt(prompt_id)
+        return redirect(url_for("settings_view", saved="1"))
 
     @app.post("/settings/deadlines")
     @auth.login_required
@@ -288,20 +303,26 @@ def create_app():
         db.add_deadline(f["course"], f["title"], f["due"],
                         float(f["weight"]) if f.get("weight") else None,
                         float(f["est_hours"]) if f.get("est_hours") else None)
-        return redirect(url_for("settings_view"))
+        return redirect(url_for("settings_view", saved="1"))
 
     @app.post("/settings/deadlines/<int:deadline_id>/archive")
     @auth.login_required
     def settings_archive_deadline(deadline_id):
         db.archive_deadline(deadline_id)
-        return redirect(url_for("settings_view"))
+        return redirect(url_for("settings_view", saved="1"))
+
+    @app.post("/settings/deadlines/<int:deadline_id>/unarchive")
+    @auth.login_required
+    def settings_unarchive_deadline(deadline_id):
+        db.unarchive_deadline(deadline_id)
+        return redirect(url_for("settings_view", saved="1"))
 
     @app.post("/settings/priority-order")
     @auth.login_required
     def settings_priority_order():
         order = [p.strip() for p in request.form["order"].split(",") if p.strip()]
         db.set_priority_order(order)
-        return redirect(url_for("settings_view"))
+        return redirect(url_for("settings_view", saved="1"))
 
     @app.post("/settings/guards")
     @auth.login_required
@@ -310,13 +331,13 @@ def create_app():
         db.set_guards({"max_consecutive_training_days": int(f["max_consecutive_training_days"]),
                       "min_sleep_hours": float(f["min_sleep_hours"]),
                       "flag_if_sessions_per_week_over": int(f["flag_if_sessions_per_week_over"])})
-        return redirect(url_for("settings_view"))
+        return redirect(url_for("settings_view", saved="1"))
 
     @app.post("/settings/wake-sleep")
     @auth.login_required
     def settings_wake_sleep():
         db.set_wake_sleep(request.form["wake"], request.form["sleep"])
-        return redirect(url_for("settings_view"))
+        return redirect(url_for("settings_view", saved="1"))
 
     # ---- Google OAuth -----------------------------------------------------
 
@@ -407,7 +428,22 @@ def create_app():
         result = backup.run()
         return jsonify(result), (200 if result["ok"] else 500)
 
-    push.start_background_loop(app)
+    @app.post("/internal/push-check")
+    def internal_push_check():
+        # Bearer-token gated, not session-gated — same reasoning as
+        # /internal/backup: a GitHub Actions cron triggers this and has no
+        # browser to log in with. See src/push.py for why reminders need
+        # an external trigger instead of an in-process scheduler.
+        header = request.headers.get("Authorization", "")
+        token = header[7:] if header.startswith("Bearer ") else ""
+        try:
+            if not auth.check_push_token(token):
+                return jsonify({"ok": False, "error": "bad token"}), 403
+        except RuntimeError as e:
+            return jsonify({"ok": False, "error": str(e)}), 500
+        push.check_and_send()
+        return jsonify({"ok": True})
+
     return app
 
 

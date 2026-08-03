@@ -30,6 +30,15 @@ def check_backup_token(candidate: str) -> bool:
     return hmac.compare_digest(candidate, real)
 
 
+def check_push_token(candidate: str) -> bool:
+    """Same reasoning as check_backup_token: push reminder checks are
+    triggered by a GitHub Actions cron job, not a browser session."""
+    real = os.environ.get("PUSH_TOKEN", "")
+    if not real:
+        raise RuntimeError("PUSH_TOKEN env var is not set")
+    return hmac.compare_digest(candidate, real)
+
+
 def login_required(view):
     @wraps(view)
     def wrapped(*a, **kw):

@@ -25,38 +25,59 @@ button.danger{{background:{FIELD};color:{ALERT};border:1px solid {ALERT}}}
 .addform input,.addform select{{flex:1;min-width:100px}}
 label.inline{{display:flex;gap:6px;align-items:center;font-size:11px;color:{MUTE};
  text-transform:uppercase;letter-spacing:.06em}}
+.saved-flash{{background:{SIGNAL};color:{FIELD};font-size:11px;letter-spacing:.08em;
+ text-transform:uppercase;padding:8px 14px;margin-bottom:14px;display:inline-block}}
+@media(prefers-reduced-motion:no-preference){{
+ .saved-flash{{animation:flash-out 2.5s ease forwards}}
+ @keyframes flash-out{{0%,70%{{opacity:1}}100%{{opacity:0}}}}
+}}
+.archived{{margin-top:10px}}
+.archived summary{{font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:{MUTE};cursor:pointer}}
+.archived .settings-row{{opacity:.7}}
 """
 
 
-def _habits(habits) -> str:
+def _archived_block(items, path: str, label_fn) -> str:
+    if not items:
+        return ""
+    rows = "".join(f"""<div class="settings-row"><span class="nm">{label_fn(x)}</span>
+<form method="post" action="/settings/{path}/{x['id']}/unarchive">
+<button>Restore</button></form></div>""" for x in items)
+    return f"""<details class="archived"><summary>Archived ({len(items)})</summary>{rows}</details>"""
+
+
+def _habits(habits, archived_habits) -> str:
     rows = "".join(f"""<div class="settings-row"><span class="nm">{esc(h['name'])}</span>
 <form method="post" action="/settings/habits/{h['id']}/rename">
 <input type="text" name="name" value="{esc(h['name'])}" size="16"><button>Rename</button></form>
-<form method="post" action="/settings/habits/{h['id']}/archive">
+<form method="post" action="/settings/habits/{h['id']}/archive" onsubmit="return confirm('Archive this habit? You can restore it from Archived below.')">
 <button class="danger">Archive</button></form></div>""" for h in habits) or '<p class="empty">No habits yet.</p>'
     return f"""{rows}
 <form class="addform" method="post" action="/settings/habits">
 <input type="text" name="name" placeholder="New habit name" required>
-<button type="submit">Add habit</button></form>"""
+<button type="submit">Add habit</button></form>
+{_archived_block(archived_habits, 'habits', lambda h: esc(h['name']))}"""
 
 
-def _prompts(prompts, kind_label, kind) -> str:
+def _prompts(prompts, kind_label, kind, archived_prompts) -> str:
     rows = "".join(f"""<div class="settings-row"><form method="post"
 action="/settings/prompts/{p['id']}/edit" style="flex:1"><textarea name="text">{esc(p['text'])}</textarea>
 <button>Save</button></form>
-<form method="post" action="/settings/prompts/{p['id']}/archive">
+<form method="post" action="/settings/prompts/{p['id']}/archive" onsubmit="return confirm('Archive this prompt? You can restore it from Archived below.')">
 <button class="danger">Archive</button></form></div>""" for p in prompts) or '<p class="empty">None.</p>'
+    archived_of_kind = [p for p in archived_prompts if p['kind'] == kind]
     return f"""<h3>{kind_label}</h3>{rows}
 <form class="addform" method="post" action="/settings/prompts">
 <input type="hidden" name="kind" value="{kind}">
 <input type="text" name="text" placeholder="New prompt" required>
-<button type="submit">Add</button></form>"""
+<button type="submit">Add</button></form>
+{_archived_block(archived_of_kind, 'prompts', lambda p: esc(p['text'][:60]))}"""
 
 
-def _deadlines(deadlines, courses) -> str:
+def _deadlines(deadlines, courses, archived_deadlines) -> str:
     rows = "".join(f"""<div class="settings-row"><span class="nm">{esc(d['course'])} —
 {esc(d['title'])} · due {esc(d['due'])}{f" · {d['weight']}%" if d.get('weight') else ""}</span>
-<form method="post" action="/settings/deadlines/{d['id']}/archive">
+<form method="post" action="/settings/deadlines/{d['id']}/archive" onsubmit="return confirm('Archive this deadline? You can restore it from Archived below.')">
 <button class="danger">Archive</button></form></div>""" for d in deadlines) or '<p class="empty">None loaded.</p>'
     opts = "".join(f'<option value="{esc(c)}">{esc(c)}</option>' for c in courses)
     return f"""{rows}
@@ -66,7 +87,8 @@ def _deadlines(deadlines, courses) -> str:
 <input type="date" name="due" required>
 <input type="number" step="1" name="weight" placeholder="Weight %">
 <input type="number" step="0.5" name="est_hours" placeholder="Est hours">
-<button type="submit">Add deadline</button></form>"""
+<button type="submit">Add deadline</button></form>
+{_archived_block(archived_deadlines, 'deadlines', lambda d: esc(f"{d['course']} — {d['title']}"))}"""
 
 
 def _priority(order) -> str:
@@ -94,7 +116,8 @@ def _wake_sleep(wake, sleep) -> str:
 <button type="submit">Save</button></form>"""
 
 
-def render_settings(state: dict) -> str:
+def render_settings(state: dict, saved: bool = False) -> str:
+    flash = '<p class="saved-flash">Saved.</p>' if saved else ""
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -105,12 +128,13 @@ def render_settings(state: dict) -> str:
 {nav_bar('settings')}
 <div class="wrap">
 <header><h1>Settings</h1></header>
+{flash}
 <div class="grid" style="grid-template-columns:1fr">
-<section><h2>Habits</h2>{_habits(state['habits'])}</section>
+<section><h2>Habits</h2>{_habits(state['habits'], state['archived_habits'])}</section>
 <section><h2>Journal prompts</h2>
-{_prompts(state['fixed_prompts'], 'Fixed (every day)', 'fixed')}
-{_prompts(state['rotating_prompts'], 'Rotating pool', 'rotating')}</section>
-<section><h2>Course deadlines</h2>{_deadlines(state['deadlines'], state['course_codes'])}</section>
+{_prompts(state['fixed_prompts'], 'Fixed (every day)', 'fixed', state['archived_prompts'])}
+{_prompts(state['rotating_prompts'], 'Rotating pool', 'rotating', state['archived_prompts'])}</section>
+<section><h2>Course deadlines</h2>{_deadlines(state['deadlines'], state['course_codes'], state['archived_deadlines'])}</section>
 <section><h2>Priority order</h2>{_priority(state['priority_order'])}</section>
 <section><h2>Overtraining guards</h2>{_guards(state['guards'])}</section>
 <section><h2>Wake / sleep window</h2>{_wake_sleep(*state['wake_sleep'])}</section>

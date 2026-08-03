@@ -1,9 +1,16 @@
 """Web Push. VAPID keypair identifies this server to push services (no
 third-party push provider, no account beyond the key pair itself).
 Reminders covered: devotions not logged by evening, today's overdue/due
-tasks each morning, deadlines inside 48 hours. A background thread checks
-these on an interval and sends at most once per day per reminder kind, so
-a container restart or a slow check loop doesn't spam duplicates.
+tasks each morning, deadlines inside 48 hours. check_and_send() gates each
+reminder kind to at most once per calendar day, so calling it repeatedly
+(or out of order) never spams duplicates.
+
+check_and_send() is triggered externally via POST /internal/push-check
+rather than an in-process scheduler — same reasoning as src/backup.py:
+Render's free plan spins the app down after ~15 minutes idle, so a
+background thread started at app boot only runs while someone happens to
+be using the app, which defeats reminders whose whole point is to fire
+when nobody's looking. See .github/workflows/push-check.yml.
 
 Both key files (vapid.json, vapid_private.pem) are generated once, locally,
 via `cli push-keys` — this app never regenerates them itself. Read-side,
@@ -14,15 +21,12 @@ flat at /etc/secrets/<name> regardless of the path typed for it).
 
 from __future__ import annotations
 import json
-import threading
-import time
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from . import secret_files
 
 TZ = ZoneInfo("America/Toronto")
-CHECK_INTERVAL_SECONDS = 900  # 15 min: reminders are daily-grain, not urgent
 
 
 def generate_vapid_keys(subject: str = "mailto:you@example.com"):
@@ -120,20 +124,3 @@ def check_and_send():
             broadcast({"title": "Deadline inside 48h",
                       "body": f"{soon[0]['course']} — {soon[0]['title']} in {soon[0]['days']}d"})
         _mark_sent("deadlines")
-
-
-def start_background_loop(app):
-    """Runs inside the Flask process. Fine for a single-user Render free
-    instance; the instance is awake at most a couple times a day anyway,
-    so this only meaningfully runs while someone's actually using it."""
-    def loop():
-        while True:
-            try:
-                with app.app_context():
-                    check_and_send()
-            except Exception:
-                pass
-            time.sleep(CHECK_INTERVAL_SECONDS)
-
-    t = threading.Thread(target=loop, daemon=True)
-    t.start()
